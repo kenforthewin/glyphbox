@@ -23,23 +23,6 @@ CORE_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "look_around",
-            "description": "Get full visual context including screen, monsters, and items. Use sparingly - only when you need spatial awareness.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reasoning": {
-                        "type": "string",
-                        "description": "Brief explanation of why you need to look around"
-                    }
-                },
-                "required": ["reasoning"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "execute_code",
             "description": "Run Python code that interacts with the game. Use for ad-hoc commands like moving, fighting, picking up items. Batch multiple operations together.",
             "parameters": {

@@ -437,6 +437,8 @@ class WorkingMemory:
             "current_level": self._current_level,
             "hp": current.hp if current else 0,
             "max_hp": current.max_hp if current else 0,
+            "position_x": current.position_x if current else 0,
+            "position_y": current.position_y if current else 0,
             "hp_trend": self.get_hp_trend(),
             "in_combat": self._in_combat,
             "recent_monsters": len(self.get_recent_monsters(max_age_turns=10)),

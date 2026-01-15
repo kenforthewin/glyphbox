@@ -1,6 +1,6 @@
 """TUI for watching the NetHack agent play."""
 
-from .app import NetHackTUI, run_tui, run_tui_async
+from .app import NetHackTUI
 from .runner import TUIAgentRunner, create_watched_agent
 from .events import (
     DecisionMade,
@@ -21,8 +21,6 @@ from .logging import (
 
 __all__ = [
     "NetHackTUI",
-    "run_tui",
-    "run_tui_async",
     "TUIAgentRunner",
     "create_watched_agent",
     "DecisionMade",

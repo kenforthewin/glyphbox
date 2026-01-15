@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 class ActionType(Enum):
     """Types of agent actions."""
 
-    LOOK_AROUND = "look_around"  # Get full game view
     EXECUTE_CODE = "execute_code"  # Run ad-hoc code
     WRITE_SKILL = "write_skill"  # Save skill to library
     INVOKE_SKILL = "invoke_skill"  # Run saved skill
@@ -42,9 +41,6 @@ class AgentDecision:
         """Check if the decision is valid."""
         if self.parse_error:
             return False
-
-        if self.action == ActionType.LOOK_AROUND:
-            return True  # No params needed
 
         if self.action == ActionType.EXECUTE_CODE:
             return self.code is not None
@@ -178,8 +174,6 @@ class DecisionParser:
         # Validate based on action type
         if action == ActionType.UNKNOWN:
             decision.parse_error = f"Unknown action type: {action_str}"
-        elif action == ActionType.LOOK_AROUND:
-            pass  # No validation needed
         elif action == ActionType.EXECUTE_CODE:
             if not code:
                 decision.parse_error = "execute_code requires code"

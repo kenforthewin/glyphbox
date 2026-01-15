@@ -21,6 +21,7 @@ class AgentConfig:
     temperature: float = 0.2
     max_turns: int = 100000
     skills_enabled: bool = False  # Enable write_skill/invoke_skill tools
+    max_recent_messages: int = 10  # Number of recent messages to keep in full
 
 
 @dataclass

@@ -154,7 +154,10 @@ def _check_hostiles(
     allow_with_hostiles: bool = False,
 ) -> tuple[bool, str]:
     """
-    Check for hostile monsters in view.
+    Check for hostile monsters in view that will chase the player.
+
+    Sessile monsters (molds, fungi, etc.) are ignored since they don't
+    move and won't chase the player.
 
     Args:
         obs: Current observation
@@ -168,11 +171,13 @@ def _check_hostiles(
         return (False, "")
 
     hostiles = get_hostile_monsters(obs)
-    if hostiles:
-        names = [m.name for m in hostiles[:3]]
+    # Filter to only monsters that will chase (not sessile like molds/fungi)
+    chasing = [m for m in hostiles if m.is_chasing]
+    if chasing:
+        names = [m.name for m in chasing[:3]]
         msg = f"Hostile monsters in view: {', '.join(names)}"
-        if len(hostiles) > 3:
-            msg += f" (+{len(hostiles) - 3} more)"
+        if len(chasing) > 3:
+            msg += f" (+{len(chasing) - 3} more)"
         return (True, msg)
 
     return (False, "")

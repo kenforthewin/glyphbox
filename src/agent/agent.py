@@ -6,6 +6,7 @@ to play NetHack autonomously.
 """
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -41,6 +42,7 @@ class AgentConfig:
     auto_save_skills: bool = True
     log_decisions: bool = True
     skills_enabled: bool = False  # Enable write_skill/invoke_skill tools
+    max_recent_messages: int = 10  # Number of recent messages to keep in full
 
 
 @dataclass
@@ -405,15 +407,6 @@ class NetHackAgent:
                 dir_name = direction.name if direction else "?"
                 game_state["stairs_up"] = f"({pos.x}, {pos.y}) [{dist} tiles {dir_name}]"
 
-            # Add current tile details (prevents "You see here" confusion)
-            items_here = self._api.get_items_here()
-            if items_here:
-                corpses = [i for i in items_here if 'corpse' in i.name.lower()]
-                if corpses:
-                    game_state["standing_on"] = f"{corpses[0].name} (edible)"
-                else:
-                    game_state["standing_on"] = items_here[0].name
-
         # Get saved skills (agent-written skills only)
         saved_skills = [
             s.name for s in self.library.list_skills()
@@ -433,20 +426,25 @@ class NetHackAgent:
         # Get last result
         last_result = self.state.last_skill_result
 
-        # Format prompt
+        # Get the full game screen (what a human would see)
+        game_screen = ""
+        if self._api:
+            game_screen = self._api.get_screen()
+
+        # Format prompt with game screen
         prompt = self.prompts.format_decision_prompt(
             game_state=game_state,
             saved_skills=saved_skills,
             recent_events=events,
             last_result=last_result,
+            game_screen=game_screen,
         )
 
         # Get LLM response with tool calling
         system = self.prompts.get_system_prompt()
 
-        # Build messages for the request
-        messages = list(self._conversation[-self._max_conversation_turns * 2:]) if self._conversation else []
-        messages.append({"role": "user", "content": prompt})
+        # Build messages for the request, compressing old messages
+        messages = self._build_messages_with_compression(prompt)
 
         response = await self.llm.complete_with_tools(
             messages=messages,
@@ -454,13 +452,15 @@ class NetHackAgent:
             system=system,
         )
 
-        # Add response to conversation
+        # Store full message in conversation history
         self._conversation.append({"role": "user", "content": prompt})
-        # For tool calls, store a compressed representation (limit reasoning to save tokens)
         if response.tool_call:
-            reasoning = response.tool_call.arguments.get('reasoning', '')[:60]
-            tool_repr = f"[{response.tool_call.name}: {reasoning}]"
-            self._conversation.append({"role": "assistant", "content": tool_repr})
+            # Store the full tool call as assistant message
+            tool_content = json.dumps({
+                "tool": response.tool_call.name,
+                "arguments": response.tool_call.arguments
+            })
+            self._conversation.append({"role": "assistant", "content": tool_content})
         else:
             self._conversation.append({"role": "assistant", "content": response.content})
 
@@ -479,6 +479,51 @@ class NetHackAgent:
             decision = self.parser.parse(response.content)
 
         return decision
+
+    def _build_messages_with_compression(self, current_prompt: str) -> list[dict]:
+        """Build message list, keeping recent messages full and compressing older ones."""
+        # Get conversation slice we'll use
+        conv_slice = self._conversation[-self._max_conversation_turns * 2:]
+        total = len(conv_slice)
+        max_recent = self.config.max_recent_messages * 2  # *2 for user+assistant pairs
+
+        messages = []
+        for i, msg in enumerate(conv_slice):
+            is_recent = (total - i) <= max_recent
+            if is_recent:
+                messages.append(msg)
+            else:
+                compressed = self._compress_message(msg)
+                if compressed:
+                    messages.append(compressed)
+
+        # Add current prompt
+        messages.append({"role": "user", "content": current_prompt})
+        return messages
+
+    def _compress_message(self, msg: dict) -> dict | None:
+        """Compress a message for older context."""
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+
+        if role == "user":
+            # User prompts contain screen + game state, just note it existed
+            return None  # Skip entirely - the assistant response has the context
+
+        if role == "assistant":
+            # Try to parse as JSON tool call
+            try:
+                data = json.loads(content)
+                if "tool" in data and "arguments" in data:
+                    tool = data["tool"]
+                    reasoning = data["arguments"].get("reasoning", "")[:60]
+                    return {"role": "assistant", "content": f"[{tool}: {reasoning}]"}
+            except (json.JSONDecodeError, TypeError):
+                pass
+            # Non-JSON assistant message, truncate
+            return {"role": "assistant", "content": content[:100] + "..." if len(content) > 100 else content}
+
+        return msg
 
     def _create_decision_from_tool_call(self, tool_call, raw_response: str) -> AgentDecision:
         """Create AgentDecision from a tool call."""
@@ -509,10 +554,7 @@ class NetHackAgent:
             reasoning=decision.reasoning,
         )
 
-        if decision.action == ActionType.LOOK_AROUND:
-            await self._execute_look_around()
-
-        elif decision.action == ActionType.EXECUTE_CODE:
+        if decision.action == ActionType.EXECUTE_CODE:
             await self._execute_code(decision.code)
 
         elif decision.action == ActionType.WRITE_SKILL:
@@ -520,42 +562,6 @@ class NetHackAgent:
 
         elif decision.action == ActionType.INVOKE_SKILL:
             await self._execute_skill(decision.skill_name, decision.params)
-
-    async def _execute_look_around(self) -> None:
-        """Execute look_around - get full game view."""
-        if not self._api:
-            logger.warning("No API available for look_around")
-            return
-
-        try:
-            # Import and execute the look_around skill
-            from skills.exploration.look_around import look_around
-            result = await look_around(self._api)
-
-            # Store result for next LLM call context
-            self.state.last_skill_result = {
-                "tool": "look_around",
-                "success": True,
-                "hint": result.data.get("hint", "") if hasattr(result, "data") else "",
-                "monsters": result.data.get("monsters", []) if hasattr(result, "data") else [],
-            }
-
-            # Add result to conversation so LLM sees it
-            hint = result.data.get("hint", "") if hasattr(result, "data") else ""
-            self._conversation.append({
-                "role": "assistant",
-                "content": f"[look_around result]\n{hint}"
-            })
-
-            logger.info("Executed look_around")
-
-        except Exception as e:
-            logger.error(f"look_around failed: {e}")
-            self.state.last_skill_result = {
-                "tool": "look_around",
-                "success": False,
-                "error": str(e),
-            }
 
     async def _execute_code(self, code: str) -> None:
         """Execute ad-hoc code in sandbox."""

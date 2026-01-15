@@ -511,6 +511,8 @@ class EpisodeMemory:
             "current_level": working_summary["current_level"],
             "hp": working_summary["hp"],
             "max_hp": working_summary["max_hp"],
+            "position_x": working_summary["position_x"],
+            "position_y": working_summary["position_y"],
             "hp_trend": working_summary["hp_trend"],
             "in_combat": working_summary["in_combat"],
             "deepest_level": dungeon_stats["deepest_main"],

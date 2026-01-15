@@ -24,14 +24,14 @@ class TestPromptManager:
     def test_get_system_prompt_no_skills(self):
         """Test that no-skills prompt excludes skill tools."""
         prompt = self.manager.get_system_prompt()
-        assert "2 tools" in prompt
+        assert "1 tool" in prompt
         assert "write_skill" not in prompt
         assert "invoke_skill" not in prompt
 
     def test_get_system_prompt_with_skills(self):
         """Test that skills-enabled prompt includes skill tools."""
         prompt = self.manager_with_skills.get_system_prompt()
-        assert "4 tools" in prompt
+        assert "3 tools" in prompt
         assert "write_skill" in prompt
         assert "invoke_skill" in prompt
 
@@ -44,7 +44,7 @@ class TestPromptManager:
             last_result=None,
         )
         assert isinstance(prompt, str)
-        assert "Current Game State" in prompt
+        assert "GAME STATE" in prompt
         # When skills disabled, no "Saved Skills" section
         assert "Saved Skills" not in prompt
 
@@ -57,7 +57,7 @@ class TestPromptManager:
             last_result=None,
         )
         assert isinstance(prompt, str)
-        assert "Current Game State" in prompt
+        assert "GAME STATE" in prompt
         assert "Saved Skills" in prompt
 
     def test_format_decision_prompt_with_game_state(self):
@@ -77,9 +77,9 @@ class TestPromptManager:
             recent_events=[],
             last_result=None,
         )
-        assert "100" in prompt  # turn
-        assert "15" in prompt  # hp (appears in HP: 15/20)
-        assert "20" in prompt  # max_hp
+        # Position and hunger are included (not visible on screen)
+        assert "Position: (10, 15)" in prompt
+        assert "not hungry" in prompt
 
     def test_format_decision_prompt_with_saved_skills(self):
         """Test formatting decision prompt with saved skills (skills enabled)."""
@@ -199,7 +199,7 @@ class TestPromptFormatting:
             last_result=None,
         )
         # Should have some instruction or state info
-        assert "Game State" in prompt or "Skills" in prompt
+        assert "GAME STATE" in prompt or "Skills" in prompt
 
     def test_skill_creation_prompt_contains_api_info(self):
         """Test that skill creation prompt mentions API."""
@@ -233,6 +233,9 @@ class TestPromptFormatting:
             "max_hp": 50,
             "current_level": 5,
             "xp_level": 4,
+            "position_x": 25,
+            "position_y": 12,
+            "hunger_state": "hungry",
         }
         prompt = self.manager.format_decision_prompt(
             game_state=game_state,
@@ -240,9 +243,9 @@ class TestPromptFormatting:
             recent_events=[],
             last_result=None,
         )
-        # Key stats should appear
-        assert "500" in prompt  # turn
-        assert "30" in prompt  # hp
+        # Position and hunger should appear (not visible on screen status bar)
+        assert "Position: (25, 12)" in prompt
+        assert "hungry" in prompt
 
 
 class TestEdgeCases:

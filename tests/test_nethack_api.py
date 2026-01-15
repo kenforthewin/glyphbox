@@ -207,7 +207,7 @@ class TestNetHackAPIPathfinding:
                 break
 
         if target:
-            result = nethack_api.move_to(target, allow_with_hostiles=True)
+            result = nethack_api.move_to(target)
             # Should either succeed or be interrupted by hostile
             assert nethack_api.position == target or not result.success
 

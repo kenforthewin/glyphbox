@@ -495,7 +495,7 @@ class NetHackAPI:
             self._mark_current_position_stepped()
         return result
 
-    def move_to(self, target, allow_with_hostiles: bool = False) -> ActionResult:
+    def move_to(self, target) -> ActionResult:
         """
         Move to a target position by pathfinding and following the path.
 
@@ -507,7 +507,6 @@ class NetHackAPI:
 
         Args:
             target: Position object or (x, y) tuple
-            allow_with_hostiles: If True, allow pathfinding with hostiles in view
 
         Returns:
             ActionResult with success/failure and messages from the journey.
@@ -516,34 +515,16 @@ class NetHackAPI:
         """
         target = self._to_position(target)
 
-        # Find path to target
-        path_result = self._find_path(target, allow_with_hostiles=allow_with_hostiles)
-
-        # Track if we're using adjacent path strategy (target was unwalkable)
-        used_adjacent_strategy = False
+        # Find path to target (always allow with hostiles - agent made conscious decision)
+        path_result = self._find_path(target, allow_with_hostiles=True)
 
         # If target is unwalkable, try to path to an adjacent tile instead
         if not path_result.success and path_result.reason == PathStopReason.TARGET_UNWALKABLE:
             # Find best adjacent tile to path to
-            adjacent_path = self._find_path_to_adjacent(target, allow_with_hostiles)
-            if adjacent_path:
+            adjacent_path = self._find_path_to_adjacent(target, allow_with_hostiles=True)
+            # Note: use 'is not None' because empty path with SUCCESS still needs to be used
+            if adjacent_path is not None and adjacent_path.success:
                 path_result = adjacent_path
-                used_adjacent_strategy = True
-
-        # If pathfinding refused because hostiles are visible, and the target IS a hostile
-        # monster position, retry with allow_with_hostiles=True. This handles the common
-        # case of deliberately moving toward a monster to attack it.
-        if not path_result.success and path_result.reason == PathStopReason.HOSTILE_IN_VIEW:
-            # Check if target has a hostile monster
-            from .glyphs import is_hostile_glyph
-            if self.observation:
-                target_glyph = int(self.observation.glyphs[target.y, target.x])
-                if is_hostile_glyph(target_glyph):
-                    # Target is a hostile - path to adjacent with hostiles allowed
-                    adjacent_path = self._find_path_to_adjacent(target, allow_with_hostiles=True)
-                    if adjacent_path:
-                        path_result = adjacent_path
-                        used_adjacent_strategy = True
 
         if not path_result.success:
             return ActionResult.failure(f"No path: {path_result.message}")
@@ -555,6 +536,10 @@ class NetHackAPI:
             all_messages.extend(result.messages)
 
             if not result.success:
+                # If we're adjacent to target, consider it success
+                # (we got as close as possible - target may be unwalkable)
+                if self.position.chebyshev_distance(target) == 1:
+                    return ActionResult(success=True, messages=all_messages, turn_elapsed=result.turn_elapsed)
                 return ActionResult(
                     success=False,
                     messages=all_messages,
@@ -571,11 +556,11 @@ class NetHackAPI:
                     turn_elapsed=True,
                 )
 
-        # Verify we reached the target (or adjacent if target was unwalkable)
+        # Verify we reached the target (or adjacent if target is unwalkable)
         if self.position == target:
             return ActionResult(success=True, messages=all_messages, turn_elapsed=True)
-        elif used_adjacent_strategy and self.position.chebyshev_distance(target) == 1:
-            # Successfully moved adjacent to unwalkable target
+        elif self.position.chebyshev_distance(target) == 1:
+            # Successfully moved adjacent to target (close enough)
             return ActionResult(success=True, messages=all_messages, turn_elapsed=True)
         else:
             all_messages.append(f"Stopped at {self.position}, expected {target}")
@@ -1079,17 +1064,19 @@ class NetHackAPI:
                     message=f"{hunger_msg}{steps_msg}",
                 )
 
-            # Check for hostile monsters
+            # Check for hostile monsters that will chase (not sessile monsters like molds)
             hostiles = self.get_hostile_monsters()
-            if hostiles:
+            chasing = [m for m in hostiles if m.is_chasing]
+            if chasing:
                 steps_msg = f" after {steps_taken} steps" if steps_taken > 0 else ""
                 return AutoexploreResult(
                     stop_reason="hostile",
                     steps_taken=steps_taken,
                     turns_elapsed=self.turn - turns_start,
                     position=self.position,
-                    message=f"Hostile: {hostiles[0].name}{steps_msg}",
+                    message=f"Hostile: {chasing[0].name}{steps_msg}",
                 )
+            # Note: sessile monsters (molds, fungi) are ignored - they don't chase
 
             # Check for items on ground
             items_here = self.get_items_here()
@@ -1156,11 +1143,18 @@ class NetHackAPI:
                 excluded = set(recently_abandoned)
                 target_result = self.find_unexplored(excluded_positions=excluded)
 
-                # If no targets found but we have recently abandoned ones, try again without exclusions
+                # If no targets found but we have recently abandoned ones, DON'T clear and retry.
+                # This would cause an infinite loop if all targets are truly unreachable (e.g., blocked by boulder).
+                # Instead, return "blocked" - the agent needs to handle this situation manually.
                 if not target_result and recently_abandoned:
-                    logger.debug(f"autoexplore: no targets found, clearing {len(recently_abandoned)} recently abandoned")
-                    recently_abandoned.clear()
-                    target_result = self.find_unexplored()
+                    logger.debug(f"autoexplore: all {len(recently_abandoned)} targets abandoned and unreachable")
+                    return AutoexploreResult(
+                        stop_reason="blocked",
+                        steps_taken=steps_taken,
+                        turns_elapsed=self.turn - turns_start,
+                        position=self.position,
+                        message=f"All exploration targets unreachable (blocked by obstacles). Abandoned targets: {recently_abandoned}",
+                    )
                 current_target = None
                 target_attempts = 0
 

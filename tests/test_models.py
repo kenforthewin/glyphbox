@@ -45,12 +45,7 @@ class TestPosition:
     def test_distance_to(self):
         pos1 = Position(0, 0)
         pos2 = Position(3, 4)
-        assert pos1.distance_to(pos2) == 7  # Manhattan distance
-
-    def test_chebyshev_distance(self):
-        pos1 = Position(0, 0)
-        pos2 = Position(3, 4)
-        assert pos1.chebyshev_distance(pos2) == 4  # Max of dx, dy
+        assert pos1.distance_to(pos2) == 4  # Chebyshev distance (max of dx, dy)
 
     def test_direction_to(self):
         center = Position(5, 5)

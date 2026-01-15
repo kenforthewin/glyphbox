@@ -110,6 +110,7 @@ class PromptManager:
         saved_skills: list[str],
         recent_events: list[dict],
         last_result: Optional[dict] = None,
+        game_screen: Optional[str] = None,
     ) -> str:
         """
         Format a decision prompt with current game context.
@@ -119,6 +120,7 @@ class PromptManager:
             saved_skills: List of skill names the agent has written
             recent_events: Recent game events
             last_result: Result of the last tool execution
+            game_screen: Full game screen (ASCII art showing what human would see)
 
         Returns:
             Formatted decision prompt
@@ -204,6 +206,7 @@ class PromptManager:
 
         # Build kwargs - only include saved_skills when skills enabled
         kwargs = {
+            "game_screen": game_screen or "Screen not available",
             "game_state": state_text,
             "recent_events": events_text,
             "last_result": result_text,
@@ -267,66 +270,50 @@ class PromptManager:
         )
 
     def _format_game_state(self, state: dict) -> str:
-        """Format game state dictionary into readable text."""
+        """Format game state dictionary into readable text.
+
+        Note: HP, Turn, Dungeon Level, XP, Stats are already visible in the
+        screen's status bar, so we only include info NOT on screen.
+        """
         lines = []
 
-        # Basic stats
-        if "hp" in state:
-            hp_pct = (state["hp"] / state.get("max_hp", 1)) * 100
-            lines.append(f"HP: {state['hp']}/{state.get('max_hp', '?')} ({hp_pct:.0f}%)")
+        # Position (coordinates not visible on screen, only @ symbol)
+        if "position_x" in state and "position_y" in state:
+            lines.append(f"Position: ({state['position_x']}, {state['position_y']})")
 
-        if "current_turn" in state:
-            lines.append(f"Turn: {state['current_turn']}")
-
-        if "current_level" in state:
-            lines.append(f"Dungeon Level: {state['current_level']}")
-
-        if "xp_level" in state or "final_xp_level" in state:
-            xp = state.get("xp_level") or state.get("final_xp_level", 1)
-            lines.append(f"Experience Level: {xp}")
-
+        # Hunger (only shows on screen when hungry/weak/fainting)
         if "hunger_state" in state:
             lines.append(f"Hunger: {state['hunger_state']}")
 
-        # Combat status
+        # Combat status indicator
         if state.get("in_combat"):
             lines.append("Status: IN COMBAT")
         elif state.get("hp_trend") == "critical":
             lines.append("Status: CRITICAL HP")
 
-        # Position
-        if "position_x" in state and "position_y" in state:
-            lines.append(f"Position: ({state['position_x']}, {state['position_y']})")
-
-        # Show what player is standing on (helps with "You see here" confusion)
-        if "standing_on" in state:
-            lines.append(f"Standing On: {state['standing_on']}")
-
-        # Hostile monsters with details
+        # Hostile monsters with details (distances, directions)
         if "hostile_monster_details" in state and state["hostile_monster_details"]:
             lines.append("Hostile Monsters:")
             for m in state["hostile_monster_details"]:
                 lines.append(f"  - {m}")
-        elif "monsters_visible" in state and state["monsters_visible"] > 0:
-            lines.append(f"Visible Monsters: {state['monsters_visible']} (none hostile)")
 
-        # Doors
+        # Doors with state and distance
         if "door_details" in state and state["door_details"]:
             lines.append("Doors:")
             for d in state["door_details"][:5]:  # Limit to 5 doors
                 lines.append(f"  - {d}")
 
-        # Stairs
+        # Stairs locations
         if "stairs_down" in state:
             lines.append(f"Stairs Down: {state['stairs_down']}")
         if "stairs_up" in state:
             lines.append(f"Stairs Up: {state['stairs_up']}")
 
-        # Items
+        # Items at current position
         if "items_here" in state and state["items_here"] > 0:
             lines.append(f"Items Here: {state['items_here']}")
 
-        return "\n".join(lines) if lines else "State unknown"
+        return "\n".join(lines) if lines else "No additional context"
 
     def _format_skills(self, skills: list[dict]) -> str:
         """Format skills list into readable text."""
@@ -370,10 +357,14 @@ class PromptManager:
 
 SYSTEM_PROMPT = """You are an expert NetHack player. You interact with the game using Python code executed in a sandbox.
 
+## Game View
+
+The full game screen (what a human player would see) is provided at the start of each turn.
+This includes the dungeon map, messages, and status bar with your stats.
+
 ## Available Tools
 
-You have 4 tools available:
-- **look_around** - Get visual context (screen, monsters, items). Use sparingly.
+You have 3 tools available:
 - **execute_code** - Run Python code to interact with the game. Batch multiple operations.
 - **write_skill** - Save reusable code as a skill. Code must be: async def skill_name(nh, **params):
 - **invoke_skill** - Run a previously saved skill.
@@ -498,8 +489,7 @@ nh.find_nearest_item()       # Returns TargetResult with nearest item position
 nh.find_nearest_monster()    # Position or None
 nh.find_doors()              # list[(Position, is_open)] - all doors on level
 
-IMPORTANT: move_to() refuses to run when hostile monsters are visible. Deal with hostiles first.
-Use allow_with_hostiles=True to override.
+Note: move_to() works even with hostile monsters visible - it will stop if a hostile appears during movement.
 
 Example - moving to stairs:
   target = nh.find_stairs_down()
@@ -587,9 +577,12 @@ nh.position                  # Position - current location
 
 4. SURVIVAL FIRST - Check HP AND hunger. Eat when Hungry/Weak. Retreat if HP < 50%.
 
-5. TAKE ACTION - Always make game progress. Move, fight, explore. Don't just look_around repeatedly."""
+5. TAKE ACTION - Always make game progress. Move, fight, explore."""
 
-DECISION_PROMPT = """Current Game State:
+DECISION_PROMPT = """=== CURRENT GAME VIEW ===
+{game_screen}
+
+=== GAME STATE ===
 {game_state}
 
 Your Saved Skills:
@@ -652,10 +645,14 @@ Provide a detailed analysis."""
 
 SYSTEM_PROMPT_NO_SKILLS = """You are an expert NetHack player. You interact with the game using Python code executed in a sandbox.
 
+## Game View
+
+The full game screen (what a human player would see) is provided at the start of each turn.
+This includes the dungeon map, messages, and status bar with your stats.
+
 ## Available Tools
 
-You have 2 tools available:
-- **look_around** - Get visual context (screen, monsters, items). Use sparingly.
+You have 1 tool available:
 - **execute_code** - Run Python code to interact with the game. Batch multiple operations.
 
 ## API Reference
@@ -778,8 +775,7 @@ nh.find_nearest_item()       # Returns TargetResult with nearest item position
 nh.find_nearest_monster()    # Position or None
 nh.find_doors()              # list[(Position, is_open)] - all doors on level
 
-IMPORTANT: move_to() refuses to run when hostile monsters are visible. Deal with hostiles first.
-Use allow_with_hostiles=True to override.
+Note: move_to() works even with hostile monsters visible - it will stop if a hostile appears during movement.
 
 Example - moving to stairs:
   target = nh.find_stairs_down()
@@ -867,9 +863,12 @@ nh.position                  # Position - current location
 
 4. SURVIVAL FIRST - Check HP AND hunger. Eat when Hungry/Weak. Retreat if HP < 50%.
 
-5. TAKE ACTION - Always make game progress. Move, fight, explore. Don't just look_around repeatedly."""
+5. TAKE ACTION - Always make game progress. Move, fight, explore."""
 
-DECISION_PROMPT_NO_SKILLS = """Current Game State:
+DECISION_PROMPT_NO_SKILLS = """=== CURRENT GAME VIEW ===
+{game_screen}
+
+=== GAME STATE ===
 {game_state}
 
 Recent Events:

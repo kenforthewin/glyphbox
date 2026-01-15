@@ -15,7 +15,6 @@ class TestActionType:
 
     def test_action_types_exist(self):
         """Test all expected action types exist."""
-        assert ActionType.LOOK_AROUND.value == "look_around"
         assert ActionType.EXECUTE_CODE.value == "execute_code"
         assert ActionType.WRITE_SKILL.value == "write_skill"
         assert ActionType.INVOKE_SKILL.value == "invoke_skill"
@@ -24,14 +23,6 @@ class TestActionType:
 
 class TestAgentDecision:
     """Tests for AgentDecision dataclass."""
-
-    def test_look_around_valid(self):
-        """Test look_around is always valid."""
-        decision = AgentDecision(
-            action=ActionType.LOOK_AROUND,
-            reasoning="Need to see surroundings",
-        )
-        assert decision.is_valid
 
     def test_execute_code_valid(self):
         """Test valid execute_code decision."""
@@ -162,21 +153,6 @@ I'll explore the dungeon.
         decision = self.parser.parse(response)
         assert decision.action == ActionType.INVOKE_SKILL
         assert decision.skill_name == "fight_monster"
-        assert decision.is_valid
-
-    def test_parse_look_around(self):
-        """Test parsing look_around decision."""
-        response = """
-```json
-{
-    "action": "look_around",
-    "reasoning": "Need to see what's around me"
-}
-```
-"""
-        decision = self.parser.parse(response)
-        assert decision.action == ActionType.LOOK_AROUND
-        assert decision.reasoning == "Need to see what's around me"
         assert decision.is_valid
 
     def test_parse_execute_code(self):

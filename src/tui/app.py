@@ -64,11 +64,11 @@ class NetHackTUI(App):
     }
 
     #decision-log {
-        height: 65%;
+        height: 50%;
     }
 
     #reasoning-panel {
-        height: 35%;
+        height: 50%;
     }
 
     #stats-bar {
@@ -241,35 +241,3 @@ class NetHackTUI(App):
     def on_unmount(self) -> None:
         """Called when app is unmounting."""
         teardown_run_logging()
-
-
-def run_tui(agent: "NetHackAgent", api: "NetHackAPI") -> None:
-    """
-    Run the TUI application.
-
-    Args:
-        agent: NetHackAgent instance
-        api: NetHackAPI instance
-    """
-    app = NetHackTUI(agent, api)
-    app.run()
-
-    # Print log file location after exit
-    if hasattr(app, "_final_log_file") and app._final_log_file:
-        print(f"\nSession log saved to: {app._final_log_file}")
-
-
-async def run_tui_async(agent: "NetHackAgent", api: "NetHackAPI") -> None:
-    """
-    Run the TUI application asynchronously.
-
-    Args:
-        agent: NetHackAgent instance
-        api: NetHackAPI instance
-    """
-    app = NetHackTUI(agent, api)
-    await app.run_async()
-
-    # Print log file location after exit
-    if hasattr(app, "_final_log_file") and app._final_log_file:
-        print(f"\nSession log saved to: {app._final_log_file}")

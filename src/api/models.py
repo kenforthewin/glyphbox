@@ -183,12 +183,12 @@ class Position:
     y: int
 
     def distance_to(self, other: "Position") -> int:
-        """Manhattan distance to another position."""
-        return abs(self.x - other.x) + abs(self.y - other.y)
+        """Chebyshev distance - number of moves with 8-directional movement."""
+        return max(abs(self.x - other.x), abs(self.y - other.y))
 
     def chebyshev_distance(self, other: "Position") -> int:
-        """Chebyshev (diagonal) distance - number of king moves."""
-        return max(abs(self.x - other.x), abs(self.y - other.y))
+        """Alias for distance_to - Chebyshev distance (8-directional)."""
+        return self.distance_to(other)
 
     def direction_to(self, other: "Position") -> Optional[Direction]:
         """Get the compass direction toward another position."""
@@ -299,10 +299,25 @@ class Monster:
     is_tame: bool = False
     threat_level: int = 0  # Estimated difficulty
 
+    # Characters for sessile monsters (don't move, only attack if you engage them)
+    # F = fungi/molds (lichen, brown/yellow/green/red mold, shrieker, violet fungus)
+    # P = piercer, lurker above, trapper (ambush predators that don't chase)
+    SESSILE_CHARS = frozenset(['F', 'P'])
+
     @property
     def is_hostile(self) -> bool:
-        """Check if monster is hostile."""
+        """Check if monster is hostile (will attack if adjacent)."""
         return not self.is_peaceful and not self.is_tame
+
+    @property
+    def is_sessile(self) -> bool:
+        """Check if monster is sessile (doesn't move/chase)."""
+        return self.char in self.SESSILE_CHARS
+
+    @property
+    def is_chasing(self) -> bool:
+        """Check if monster will actively chase the player."""
+        return self.is_hostile and not self.is_sessile
 
 
 @dataclass

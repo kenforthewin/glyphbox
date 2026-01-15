@@ -1,8 +1,8 @@
 """
-Docker sandbox manager for skill execution.
+Sandbox manager for skill execution.
 
-Manages Docker containers that execute agent-generated skill code
-in a secure, isolated environment.
+Manages secure execution of agent-generated skill code
+using a restricted Python execution environment.
 """
 
 import asyncio
@@ -16,9 +16,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .exceptions import (
-    SandboxCommunicationError,
     SandboxError,
-    SandboxStartupError,
     SkillExecutionError,
     SkillTimeoutError,
 )
@@ -51,7 +49,7 @@ class APIFailureTracker:
             "No path through explored territory":
                 "Path goes through unexplored areas. Explore corridors/rooms between you and target first.",
             "Hostile monsters in view":
-                "Cannot pathfind while hostiles visible. Fight or flee first, or use allow_with_hostiles=True.",
+                "Cannot pathfind while hostiles visible. Fight or flee first. (Note: move_to() ignores this check)",
             "is not walkable":
                 "Target position is blocked (wall, boulder, closed door, or monster).",
             "item_letter must be a single character":
@@ -111,14 +109,8 @@ class APIFailureTracker:
         self._failed_calls.clear()
 
 
-# Default resource limits
-DEFAULT_MEMORY_LIMIT = "256m"
-DEFAULT_CPU_PERIOD = 100000
-DEFAULT_CPU_QUOTA = 50000  # 50% of one CPU
+# Default timeout for skill execution
 DEFAULT_TIMEOUT_SECONDS = 30.0
-
-# Sandbox image name
-SANDBOX_IMAGE = "nethack-skill-sandbox"
 
 
 @dataclass
@@ -139,38 +131,29 @@ class ExecutionResult:
 class SandboxConfig:
     """Configuration for sandbox execution."""
 
-    memory_limit: str = DEFAULT_MEMORY_LIMIT
-    cpu_period: int = DEFAULT_CPU_PERIOD
-    cpu_quota: int = DEFAULT_CPU_QUOTA
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
-    network_disabled: bool = True
-    read_only: bool = True
-    use_gvisor: bool = False  # Enable on Linux for production
 
 
 class SkillSandbox:
     """
-    Manages skill execution in Docker containers.
+    Manages skill execution in a restricted Python environment.
 
     This class provides a secure sandbox for running agent-generated
-    Python code. Skills are executed in isolated Docker containers
-    with strict resource limits and no network access.
+    Python code using restricted builtins and namespace isolation.
 
     Example usage:
         sandbox = SkillSandbox()
 
-        # Validate and execute a skill
-        result = await sandbox.execute(
-            code=skill_code,
-            skill_name="explore_room",
-            params={"max_steps": 100},
-            api_proxy=proxy_instance,
+        # Execute ad-hoc code
+        result = await sandbox.execute_code(
+            code="nh.move(Direction.E)",
+            api=api_instance,
         )
 
         if result.success:
-            print(f"Skill completed: {result.result}")
+            print(f"Code completed: {result.result}")
         else:
-            print(f"Skill failed: {result.error}")
+            print(f"Code failed: {result.error}")
     """
 
     def __init__(self, config: Optional[SandboxConfig] = None):
@@ -181,201 +164,6 @@ class SkillSandbox:
             config: Sandbox configuration (uses defaults if not provided)
         """
         self.config = config or SandboxConfig()
-        self._docker_client: Optional[Any] = None
-        self._container_pool: list[Any] = []
-        self._initialized = False
-
-    async def initialize(self) -> None:
-        """Initialize Docker client and verify sandbox image exists."""
-        if self._initialized:
-            return
-
-        try:
-            import docker
-
-            self._docker_client = docker.from_env()
-
-            # Check if sandbox image exists
-            try:
-                self._docker_client.images.get(SANDBOX_IMAGE)
-                logger.info(f"Sandbox image '{SANDBOX_IMAGE}' found")
-            except docker.errors.ImageNotFound:
-                logger.warning(
-                    f"Sandbox image '{SANDBOX_IMAGE}' not found. "
-                    "Build it with: docker build -t nethack-skill-sandbox docker/"
-                )
-
-            self._initialized = True
-            logger.info("Sandbox manager initialized")
-
-        except ImportError:
-            raise SandboxError(
-                "Docker SDK not installed. Install with: pip install docker"
-            )
-        except Exception as e:
-            raise SandboxStartupError(f"Failed to initialize Docker client: {e}")
-
-    async def execute(
-        self,
-        code: str,
-        skill_name: str,
-        params: dict[str, Any],
-        api_proxy: Any,  # APIProxy instance
-        timeout: Optional[float] = None,
-    ) -> ExecutionResult:
-        """
-        Execute a skill in the sandbox.
-
-        Args:
-            code: Python source code of the skill
-            skill_name: Name of the skill function to execute
-            params: Parameters to pass to the skill
-            api_proxy: API proxy for handling NetHack API calls
-            timeout: Execution timeout in seconds (uses config default if not specified)
-
-        Returns:
-            ExecutionResult with success/failure status and results
-
-        Raises:
-            SkillTimeoutError: If execution exceeds timeout
-            SkillExecutionError: If execution fails
-            SandboxError: If sandbox infrastructure fails
-        """
-        if not self._initialized:
-            await self.initialize()
-
-        timeout = timeout or self.config.timeout_seconds
-
-        # Validate code first
-        validation = validate_skill(code, skill_name)
-        if not validation.valid:
-            return ExecutionResult(
-                success=False,
-                error=f"Validation failed: {'; '.join(validation.errors)}",
-            )
-
-        start_time = time.time()
-
-        try:
-            # Execute in sandbox
-            result = await asyncio.wait_for(
-                self._execute_in_container(code, skill_name, params, api_proxy),
-                timeout=timeout,
-            )
-            result.execution_time = time.time() - start_time
-            return result
-
-        except asyncio.TimeoutError:
-            raise SkillTimeoutError(
-                f"Skill '{skill_name}' exceeded timeout of {timeout}s",
-                skill_name=skill_name,
-                timeout_seconds=timeout,
-            )
-        except Exception as e:
-            logger.exception(f"Skill execution failed: {e}")
-            return ExecutionResult(
-                success=False,
-                error=str(e),
-                execution_time=time.time() - start_time,
-            )
-
-    async def _execute_in_container(
-        self,
-        code: str,
-        skill_name: str,
-        params: dict[str, Any],
-        api_proxy: Any,
-    ) -> ExecutionResult:
-        """Execute skill code inside a Docker container."""
-        import docker
-
-        if not self._docker_client:
-            raise SandboxError("Docker client not initialized")
-
-        # Create temporary directory for skill code and communication
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmppath = Path(tmpdir)
-
-            # Write skill code
-            skill_file = tmppath / "skill.py"
-            skill_file.write_text(code)
-
-            # Write execution parameters
-            params_file = tmppath / "params.json"
-            params_file.write_text(json.dumps({
-                "skill_name": skill_name,
-                "params": params,
-            }))
-
-            # Create socket path for API communication
-            socket_path = tmppath / "api.sock"
-
-            # Start API proxy server (will communicate via socket)
-            proxy_task = asyncio.create_task(
-                api_proxy.serve(str(socket_path))
-            )
-
-            try:
-                # Container configuration
-                container_config = {
-                    "image": SANDBOX_IMAGE,
-                    "command": ["python", "/sandbox/run_skill.py"],
-                    "volumes": {
-                        str(tmppath): {"bind": "/sandbox", "mode": "rw"},
-                    },
-                    "mem_limit": self.config.memory_limit,
-                    "cpu_period": self.config.cpu_period,
-                    "cpu_quota": self.config.cpu_quota,
-                    "network_disabled": self.config.network_disabled,
-                    "read_only": self.config.read_only,
-                    "security_opt": ["no-new-privileges"],
-                    "detach": True,
-                    "remove": True,
-                }
-
-                # Use gVisor runtime if configured (Linux only)
-                if self.config.use_gvisor:
-                    container_config["runtime"] = "runsc"
-
-                # Create and start container
-                container = self._docker_client.containers.run(**container_config)
-
-                # Wait for container to complete
-                exit_result = container.wait()
-                exit_code = exit_result.get("StatusCode", -1)
-
-                # Get container logs
-                stdout = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
-                stderr = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
-
-                # Read result file
-                result_file = tmppath / "result.json"
-                if result_file.exists():
-                    result_data = json.loads(result_file.read_text())
-                    return ExecutionResult(
-                        success=result_data.get("success", False),
-                        result=result_data.get("result"),
-                        error=result_data.get("error"),
-                        stdout=stdout,
-                        stderr=stderr,
-                        actions_taken=result_data.get("actions_taken", 0),
-                        turns_elapsed=result_data.get("turns_elapsed", 0),
-                    )
-                else:
-                    return ExecutionResult(
-                        success=False,
-                        error=f"Container exited with code {exit_code}",
-                        stdout=stdout,
-                        stderr=stderr,
-                    )
-
-            finally:
-                # Clean up proxy task
-                proxy_task.cancel()
-                try:
-                    await proxy_task
-                except asyncio.CancelledError:
-                    pass
 
     async def execute_local(
         self,
@@ -386,10 +174,7 @@ class SkillSandbox:
         timeout: Optional[float] = None,
     ) -> ExecutionResult:
         """
-        Execute a skill locally (without Docker) for development/testing.
-
-        WARNING: This executes code directly in the current process.
-        Only use for testing with trusted code.
+        Execute a skill locally in a restricted Python environment.
 
         Args:
             code: Python source code of the skill
@@ -806,26 +591,3 @@ class SkillSandbox:
                 signal.alarm(0)  # Cancel alarm
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
-
-    def close(self) -> None:
-        """Clean up resources."""
-        # Clean up any pooled containers
-        for container in self._container_pool:
-            try:
-                container.remove(force=True)
-            except Exception:
-                pass
-        self._container_pool.clear()
-
-        if self._docker_client:
-            self._docker_client.close()
-            self._docker_client = None
-
-        self._initialized = False
-
-    async def __aenter__(self) -> "SkillSandbox":
-        await self.initialize()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        self.close()

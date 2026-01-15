@@ -296,6 +296,7 @@ async def create_watched_agent(
         max_consecutive_errors=5,
         decision_timeout=60.0,
         skill_timeout=config.sandbox.timeout_seconds,
+        max_recent_messages=config.agent.max_recent_messages,
     )
 
     agent = NetHackAgent(

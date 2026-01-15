@@ -49,15 +49,3 @@ class SandboxError(Exception):
     """Base exception for sandbox infrastructure errors."""
 
     pass
-
-
-class SandboxStartupError(SandboxError):
-    """Raised when sandbox container fails to start."""
-
-    pass
-
-
-class SandboxCommunicationError(SandboxError):
-    """Raised when communication with sandbox fails."""
-
-    pass
