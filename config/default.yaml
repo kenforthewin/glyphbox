@@ -1,0 +1,76 @@
+# NetHack Agent Configuration
+# ===========================
+
+# Agent settings
+agent:
+  # LLM provider: "openrouter" or "anthropic"
+  provider: "openrouter"
+  # LLM model to use for strategic decisions (OpenRouter format)
+  model: "anthropic/claude-opus-4.5"
+  # OpenRouter base URL
+  base_url: "https://openrouter.ai/api/v1"
+  # Temperature for LLM sampling (0.0 = deterministic, 1.0 = creative)
+  temperature: 0.2
+  # Maximum turns before ending episode
+  max_turns: 100000
+  # Enable skill tools (write_skill, invoke_skill) - when false, only look_around and execute_code available
+  skills_enabled: false
+
+# Environment settings
+environment:
+  # NLE environment name
+  name: "NetHackChallenge-v0"
+  # Maximum steps per episode (NLE limit)
+  max_episode_steps: 1000000
+  # Render mode: null for no rendering, "human" for visual, "ansi" for terminal
+  render_mode: null
+  # Character selection: "random" or specific like "val-hum-law-fem"
+  character: "random"
+
+# Sandbox settings
+sandbox:
+  # Sandbox type: "docker" or "local" (local is for development only)
+  type: "docker"
+  # Docker image for skill execution
+  image: "nethack-skill-sandbox:latest"
+  # Memory limit for sandbox containers
+  memory_limit: "2g"
+  # CPU limit (fraction of one CPU)
+  cpu_limit: 1
+  # Skill execution timeout in seconds
+  timeout_seconds: 30
+  # Use gVisor runtime (requires Linux)
+  use_gvisor: false
+
+# Skill system settings
+skills:
+  # Path to skill library directory
+  library_path: "./skills"
+  # Automatically save successful new skills
+  auto_save: true
+  # Minimum success rate to auto-save a skill (0.0 to 1.0)
+  min_success_rate_to_save: 0.3
+  # Maximum actions per skill execution
+  max_actions_per_skill: 500
+
+# Memory settings
+memory:
+  # Path to SQLite database
+  database_path: "./data/memory.db"
+  # Maximum items in short-term memory
+  max_short_term_items: 100
+  # Enable dungeon mapping
+  enable_dungeon_memory: true
+
+# Logging settings
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  # Log format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  # Log file path (null for stdout only)
+  file: "./data/agent.log"
+  # Log LLM prompts and responses
+  log_llm: true
+  # Log game actions
+  log_actions: true

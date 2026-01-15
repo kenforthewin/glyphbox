@@ -1,0 +1,225 @@
+"""
+Cautious exploration skill.
+
+Explores the dungeon while watching for danger, stopping when
+threats are detected to allow the strategic layer to decide.
+"""
+
+
+async def cautious_explore(nh, max_steps: int = 50, hp_threshold: float = 0.3, **params):
+    """
+    Cautiously explore the dungeon until danger is encountered.
+
+    Moves toward unexplored areas while monitoring for:
+    - Adjacent hostile monsters
+    - Low HP (below threshold)
+    - Fully explored level
+
+    Category: exploration
+    Stops when: monster_adjacent, low_hp, fully_explored, max_steps, stuck
+
+    Args:
+        nh: NetHackAPI instance
+        max_steps: Maximum exploration steps before stopping
+        hp_threshold: HP fraction below which to stop (0.0-1.0)
+
+    Returns:
+        SkillResult with exploration outcome
+    """
+    actions_taken = 0
+    turns_start = nh.turn
+    last_position = None
+    stuck_count = 0
+    max_stuck = 3  # Report stuck after 3 iterations without progress
+    searches_at_position = {}  # Track searches per position
+    max_searches_per_position = 15  # Search up to 15 times before giving up on a spot
+
+    # Track exploration progress
+    initial_level = nh.get_current_level()
+    initial_explored = initial_level.explored_tiles if initial_level else 0
+    no_progress_count = 0
+    max_no_progress = 20  # Give up if no new tiles explored after this many iterations
+
+    for step in range(max_steps):
+        # Check if game is over
+        if nh.is_done:
+            return SkillResult.stopped(
+                "game_over",
+                success=False,
+                actions=actions_taken,
+                turns=nh.turn - turns_start,
+            )
+
+        # Check for adjacent monsters (highest priority)
+        adjacent_monsters = nh.get_adjacent_monsters()
+        if adjacent_monsters:
+            hostile = [m for m in adjacent_monsters if m.is_hostile]
+            if hostile:
+                return SkillResult.stopped(
+                    "monster_adjacent",
+                    success=False,
+                    actions=actions_taken,
+                    turns=nh.turn - turns_start,
+                    monster=hostile[0].name,
+                    monster_pos={"x": hostile[0].position.x, "y": hostile[0].position.y},
+                )
+
+        # Check HP
+        stats = nh.get_stats()
+        if stats.hp / stats.max_hp < hp_threshold:
+            return SkillResult.stopped(
+                "low_hp",
+                success=False,
+                actions=actions_taken,
+                turns=nh.turn - turns_start,
+                hp=stats.hp,
+                max_hp=stats.max_hp,
+            )
+
+        # Track position to detect being stuck
+        current_pos = stats.position
+        pos_key = (current_pos.x, current_pos.y)
+
+        if last_position and current_pos == last_position:
+            stuck_count += 1
+            # Only report stuck if we've searched enough times at this position
+            searches_done = searches_at_position.get(pos_key, 0)
+            if stuck_count >= max_stuck and searches_done >= max_searches_per_position:
+                return SkillResult.stopped(
+                    "stuck",
+                    success=False,
+                    actions=actions_taken,
+                    turns=nh.turn - turns_start,
+                    searches_done=searches_done,
+                    hint="Could not find a path to unexplored areas after extensive searching. May need to find another route.",
+                )
+        else:
+            stuck_count = 0
+        last_position = current_pos
+
+        # Check if we're making exploration progress
+        current_level = nh.get_current_level()
+        current_explored = current_level.explored_tiles if current_level else 0
+        if current_explored <= initial_explored:
+            no_progress_count += 1
+            if no_progress_count >= max_no_progress:
+                return SkillResult.stopped(
+                    "no_progress",
+                    success=False,
+                    actions=actions_taken,
+                    turns=nh.turn - turns_start,
+                    hint="No new tiles explored after many attempts. The area may be fully explored or blocked.",
+                )
+        else:
+            # Made progress - update baseline and reset counter
+            initial_explored = current_explored
+            no_progress_count = 0
+
+        # Check for visible (non-adjacent) monsters
+        visible_monsters = nh.get_visible_monsters()
+        hostile_visible = [m for m in visible_monsters if m.is_hostile]
+        if hostile_visible:
+            # Monster visible but not adjacent - report but may continue
+            closest = min(hostile_visible, key=lambda m: stats.position.chebyshev_distance(m.position))
+            if stats.position.chebyshev_distance(closest.position) <= 3:
+                # Close enough to be concerning
+                return SkillResult.stopped(
+                    "monster_spotted",
+                    success=False,
+                    actions=actions_taken,
+                    turns=nh.turn - turns_start,
+                    monster=closest.name,
+                    distance=stats.position.chebyshev_distance(closest.position),
+                )
+
+        # Find unexplored area to move toward
+        unexplored = nh.find_unexplored()
+        if not unexplored:
+            return SkillResult.stopped(
+                "fully_explored",
+                success=True,
+                actions=actions_taken,
+                turns=nh.turn - turns_start,
+            )
+
+        # Check if we're already at the exploration frontier
+        if unexplored == current_pos:
+            # We're at the frontier - first try moving into unexplored tiles
+            moved = False
+
+            # Get current level to check what's in each direction
+            level = nh.get_current_level()
+
+            for direction in [Direction.N, Direction.S, Direction.E, Direction.W,
+                              Direction.NE, Direction.NW, Direction.SE, Direction.SW]:
+                target_pos = current_pos.move(direction)
+                target_tile = level.get_tile(target_pos)
+
+                # Skip directions that are clearly walls (not doors)
+                if target_tile and not target_tile.is_walkable and target_tile.char != '+':
+                    continue
+
+                # Try moving
+                result = nh.move(direction)
+                if result.turn_elapsed:
+                    actions_taken += 1
+                if result.success:
+                    moved = True
+                    break
+
+                # Only try opening door if tile looks like a closed door
+                if target_tile and target_tile.char == '+':
+                    open_result = nh.open_door(direction)
+                    if open_result.turn_elapsed:
+                        actions_taken += 1
+                    result = nh.move(direction)
+                    if result.turn_elapsed:
+                        actions_taken += 1
+                    if result.success:
+                        moved = True
+                        break
+
+            if not moved:
+                # All directions blocked - search for secret doors
+                nh.search()
+                actions_taken += 1
+                searches_at_position[pos_key] = searches_at_position.get(pos_key, 0) + 1
+            continue
+
+        # Find path to unexplored area
+        path = nh.find_path(unexplored, avoid_monsters=True)
+        if not path:
+            # Can't reach unexplored - try without avoiding monsters
+            path = nh.find_path(unexplored, avoid_monsters=False)
+
+        if not path:
+            # Still no path - search for secret doors and continue
+            nh.search()
+            actions_taken += 1
+            searches_at_position[pos_key] = searches_at_position.get(pos_key, 0) + 1
+            continue
+
+        # Take one step along the path
+        direction = path[0]
+        result = nh.move(direction)
+        if result.turn_elapsed:
+            actions_taken += 1
+
+        if not result.success:
+            # Movement blocked - might be a closed door
+            open_result = nh.open_door(direction)
+            if open_result.turn_elapsed:
+                actions_taken += 1
+            # Try the move again
+            result = nh.move(direction)
+            if result.turn_elapsed:
+                actions_taken += 1
+
+    # Reached max steps
+    return SkillResult.stopped(
+        "max_steps",
+        success=False,
+        actions=actions_taken,
+        turns=nh.turn - turns_start,
+        steps=max_steps,
+    )
