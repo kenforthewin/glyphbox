@@ -223,38 +223,6 @@ class TestNetHackAPIPathfinding:
         # May or may not find unexplored tiles
         assert result.position is None or isinstance(result.position, Position)
 
-class TestNetHackAPIKnowledge:
-    """Tests for API knowledge methods."""
-
-    def test_lookup_monster(self, nethack_api):
-        """Test monster lookup."""
-        info = nethack_api.lookup_monster("goblin")
-
-        assert info is not None
-        assert info.name == "goblin"
-        assert info.difficulty >= 0  # difficulty field, not level
-
-    def test_lookup_monster_not_found(self, nethack_api):
-        """Test monster lookup for unknown monster."""
-        info = nethack_api.lookup_monster("nonexistent_monster_xyz")
-
-        assert info is None
-
-    def test_is_corpse_safe(self, nethack_api):
-        """Test corpse safety check."""
-        # Lichen corpses are always safe
-        assert nethack_api.is_corpse_safe("lichen") is True
-
-        # Cockatrice corpses are dangerous
-        assert nethack_api.is_corpse_safe("cockatrice") is False
-
-    def test_is_dangerous_melee(self, nethack_api):
-        """Test dangerous monster check."""
-        assert nethack_api.is_dangerous_melee("floating eye") is True
-        assert nethack_api.is_dangerous_melee("cockatrice") is True
-        assert nethack_api.is_dangerous_melee("grid bug") is False
-
-
 class TestNetHackAPIStatePersistence:
     """Tests for state persistence across actions."""
 

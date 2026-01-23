@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # These are tracked for feedback. Query methods are not tracked.
 ACTION_METHODS = {
     # Movement
-    "move", "move_toward", "move_to", "go_up", "go_down",
+    "move", "move_to", "go_up", "go_down",
     # Combat
     "attack", "kick", "fire", "throw",
     # Items

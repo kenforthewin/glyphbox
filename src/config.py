@@ -55,6 +55,10 @@ class AgentConfig:
     # How many recent turns keep their full map (0 = only current turn has map)
     # Higher values give more spatial context but use more tokens
     maps_in_history: int = 1
+    # Show inventory in context each turn (helps agent track items without querying)
+    show_inventory: bool = True
+    # Show adjacent tiles (N, S, E, W, etc.) with descriptions
+    show_adjacent_tiles: bool = True
 
     def get_reasoning_effort(self) -> Optional[ReasoningEffort]:
         """Get reasoning effort as enum, or None if disabled."""

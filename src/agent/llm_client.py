@@ -373,10 +373,13 @@ class LLMClient:
 
         full_messages.extend(messages)
 
-        # Use "auto" which is universally supported across all providers
-        # "required" is not supported by many models (GLM, some others)
-        # The system prompt already instructs the model to use tools
-        tool_choice = "auto"
+        # Use "required" for models that support it (forces tool use, no text-only responses)
+        # Fall back to "auto" for models that don't support it (GLM, some others)
+        model_lower = self.model.lower()
+        if "claude" in model_lower or "anthropic" in model_lower:
+            tool_choice = "required"
+        else:
+            tool_choice = "auto"
 
         # Retry loop to ensure we get a tool call
         for attempt in range(max_tool_retries):

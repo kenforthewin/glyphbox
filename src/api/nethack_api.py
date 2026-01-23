@@ -12,16 +12,6 @@ from src.memory.dungeon import DungeonMemory, LevelMemory
 
 from .actions import ActionExecutor
 from .environment import NLEWrapper, Observation
-from .knowledge import (
-    MonsterInfo,
-    elbereth_effective_against,
-    estimate_monster_difficulty,
-    get_corpse_effects,
-    is_corpse_safe,
-    is_dangerous_melee,
-    is_prayer_safe,
-    lookup_monster,
-)
 from .models import (
     ALL_DIRECTIONS,
     ActionResult,
@@ -41,7 +31,6 @@ from .pathfinding import (
     PathStopReason,
     TargetResult,
     find_nearest,
-    find_nearest_monster,
     find_path,
     find_unexplored,
     is_doorway_glyph,
@@ -378,6 +367,52 @@ class NetHackAPI:
             return get_position(self.observation)
         return Position(0, 0)
 
+    @property
+    def hp(self) -> int:
+        """Get current HP. Use in conditionals: `if nh.hp < 10:`"""
+        if self.observation:
+            return get_stats(self.observation).hp
+        return 0
+
+    @property
+    def max_hp(self) -> int:
+        """Get maximum HP. Use in conditionals: `if nh.hp < nh.max_hp * 0.3:`"""
+        if self.observation:
+            return get_stats(self.observation).max_hp
+        return 0
+
+    @property
+    def dungeon_level(self) -> int:
+        """Get current dungeon level."""
+        if self.observation:
+            return get_stats(self.observation).dungeon_level
+        return 0
+
+    @property
+    def is_hungry(self) -> bool:
+        """True if hunger is Hungry, Weak, or Fainting. Use for food decisions."""
+        if self.observation:
+            stats = get_stats(self.observation)
+            from .models import HungerState
+            return stats.hunger in (HungerState.HUNGRY, HungerState.WEAK, HungerState.FAINTING)
+        return False
+
+    @property
+    def is_weak(self) -> bool:
+        """True if hunger is Weak or Fainting. CRITICAL - eat immediately!"""
+        if self.observation:
+            stats = get_stats(self.observation)
+            from .models import HungerState
+            return stats.hunger in (HungerState.WEAK, HungerState.FAINTING)
+        return False
+
+    @property
+    def has_adjacent_hostile(self) -> bool:
+        """True if there's a hostile monster in any adjacent tile. Use in combat loops."""
+        if self.observation:
+            return len(get_adjacent_hostiles(self.observation)) > 0
+        return False
+
     # ==================== State Queries ====================
 
     def get_stats(self) -> Stats:
@@ -448,7 +483,7 @@ class NetHackAPI:
         if not self.observation:
             return {}
 
-        from .glyphs import parse_glyph
+        from .glyphs import parse_glyph, GlyphType
 
         pos = self.position
         obs = self.observation
@@ -485,7 +520,12 @@ class NetHackAPI:
 
             # Use parse_glyph - it already has all the logic
             info = parse_glyph(glyph, char, description)
-            result[dir_name] = info.name
+            # Include character for monsters/pets so agent can match with map
+            # e.g. "kitten 'f'" helps distinguish from "fox 'd'"
+            if info.glyph_type in (GlyphType.MONSTER, GlyphType.PET):
+                result[dir_name] = f"{info.name} '{char}'"
+            else:
+                result[dir_name] = info.name
 
         return result
 
@@ -560,17 +600,6 @@ class NetHackAPI:
             self._mark_current_position_stepped()
         return result
 
-    def move_toward(self, target) -> ActionResult:
-        """Move one step toward a target position (Position or (x,y) tuple)."""
-        if not self._actions:
-            return ActionResult.failure("Environment not initialized")
-        target = self._to_position(target)
-        result = self._actions.move_toward(target)
-        self._record_messages(result.messages)
-        if result.success:
-            self._mark_current_position_stepped()
-        return result
-
     def move_to(self, target, pass_through_doors: bool = False) -> ActionResult:
         """
         Move to a target position by pathfinding and following the path.
@@ -627,18 +656,8 @@ class NetHackAPI:
                     messages=all_messages,
                     turn_elapsed=result.turn_elapsed,
                 )
-
-            # Check if we've been interrupted by chasing monsters
-            # Sessile monsters (floating eyes, molds, etc.) don't interrupt travel
-            hostiles = self.get_hostile_monsters()
-            chasing = [m for m in hostiles if m.is_chasing]
-            if chasing:
-                all_messages.append(f"Movement interrupted - {chasing[0].name} appeared")
-                return ActionResult(
-                    success=False,
-                    messages=all_messages,
-                    turn_elapsed=True,
-                )
+            # Note: We don't interrupt for hostiles - agent made conscious decision to travel.
+            # If a hostile blocks the path, the move() will fail naturally.
 
         # Verify we reached the target (or adjacent if target is unwalkable)
         if self.position == target:
@@ -1033,16 +1052,17 @@ class NetHackAPI:
         Explore automatically until interrupted (NetHack4-style).
 
         Runs exploration as a loop, moving toward unexplored areas and
-        stopping when:
+        stopping only for critical conditions:
         - No unexplored areas reachable (fully_explored)
-        - Hostile monster appears (hostile)
+        - Nearby hostile chasing monster (within 5 tiles) (hostile)
         - HP drops below 30% (low_hp)
-        - Found interesting feature - stairs, altar, etc. (feature)
-        - Item found on ground (item)
+        - Hungry or weaker (hungry)
         - max_steps reached (max_steps)
-        - Hunger >= WEAK (hungry)
         - Blind, confused, or stunned (blocked)
         - In Sokoban (sokoban)
+
+        Does NOT stop for: items, stairs, altars, fountains, distant hostiles.
+        The agent can check for these after exploration completes.
 
         Returns:
             AutoexploreResult with stop_reason, steps_taken, position
@@ -1106,25 +1126,6 @@ class NetHackAPI:
         recently_abandoned: list[Position] = []  # FIFO queue of recently abandoned targets
         max_recently_abandoned = 3  # Keep last N abandoned targets in the skip list
 
-        # Track starting hunger state for conditional stopping:
-        # - If started NOT hungry → stop when becomes HUNGRY
-        # - If started HUNGRY → stop only when becomes WEAK
-        starting_stats = self.get_stats()
-        started_hungry = starting_stats.is_hungry
-
-        # Capture tiles that were already stepped at start of autoexplore.
-        # We only stop for items/features on NEW tiles (not previously stepped).
-        # This prevents loops where agent ignores an item, walks away, then
-        # autoexplore routes back through and stops at the same item again.
-        initially_stepped: set[tuple[int, int]] = set()
-        if self._dungeon_memory and self.observation:
-            dungeon_lvl = int(self.observation.blstats[12])  # BL_DEPTH
-            level_mem = self._dungeon_memory.get_level(dungeon_lvl)
-            if level_mem:
-                for y in range(21):
-                    for x in range(79):
-                        if level_mem.is_stepped(x, y):
-                            initially_stepped.add((x, y))
 
         while steps_taken < max_steps:
             # Check if game ended
@@ -1149,20 +1150,8 @@ class NetHackAPI:
                     message=f"HP low: {stats.hp}/{stats.max_hp}{steps_msg}",
                 )
 
-            # Check hunger - conditional based on starting state:
-            # - If started NOT hungry → stop when becomes HUNGRY
-            # - If started HUNGRY → stop only when becomes WEAK
-            should_stop_hunger = False
-            if started_hungry:
-                # Started hungry - only stop if now WEAK
-                if stats.is_weak:
-                    should_stop_hunger = True
-            else:
-                # Started not hungry - stop if now HUNGRY
-                if stats.is_hungry:
-                    should_stop_hunger = True
-
-            if should_stop_hunger:
+            # Stop when hungry so agent can find food before it becomes critical
+            if stats.is_hungry:
                 steps_msg = f" after {steps_taken} steps" if steps_taken > 0 else ""
                 hunger_msg = "Weak - need food urgently" if stats.is_weak else "Hungry - need food"
                 return AutoexploreResult(
@@ -1173,61 +1162,24 @@ class NetHackAPI:
                     message=f"{hunger_msg}{steps_msg}",
                 )
 
-            # Check for hostile monsters that will chase (not sessile monsters like molds)
+            # Check for NEARBY hostile monsters that will chase (not sessile monsters like molds)
+            # Only stop if hostile is within 5 tiles - distant hostiles don't interrupt exploration
+            current_pos = self.position
             hostiles = self.get_hostile_monsters()
-            chasing = [m for m in hostiles if m.is_chasing]
-            if chasing:
+            nearby_chasing = [
+                m for m in hostiles
+                if m.is_chasing and current_pos.chebyshev_distance(m.position) <= 5
+            ]
+            if nearby_chasing:
                 steps_msg = f" after {steps_taken} steps" if steps_taken > 0 else ""
                 return AutoexploreResult(
                     stop_reason="hostile",
                     steps_taken=steps_taken,
                     turns_elapsed=self.turn - turns_start,
                     position=self.position,
-                    message=f"Hostile: {chasing[0].name}{steps_msg}",
+                    message=f"Hostile nearby: {nearby_chasing[0].name}{steps_msg}",
                 )
-            # Note: sessile monsters (molds, fungi) are ignored - they don't chase
-
-            # Get current position for checks below
-            current_pos = self.position
-            pos_tuple = (current_pos.x, current_pos.y)
-            is_new_tile = pos_tuple not in initially_stepped
-
-            # Check for items on ground - only stop at NEW tiles to avoid loops
-            # where agent ignores item, walks away, then returns and stops again
-            if is_new_tile and steps_taken > 0:
-                items_here = self.get_items_here()
-                if items_here:
-                    return AutoexploreResult(
-                        stop_reason="item",
-                        steps_taken=steps_taken,
-                        turns_elapsed=self.turn - turns_start,
-                        position=self.position,
-                        message=f"Found item: {items_here[0].name} after {steps_taken} steps",
-                    )
-
-            # Note: We no longer stop at dead ends - let autoexplore continue until
-            # there are no more reachable unexplored areas. The agent can decide
-            # when to search for secret doors based on the visible map.
-
-            # Check for unvisited interesting features - only on NEW tiles
-            current_tile = self.get_tile(current_pos)
-            if is_new_tile and current_tile and steps_taken > 0:
-                if current_tile.is_stairs_up or current_tile.is_stairs_down:
-                    return AutoexploreResult(
-                        stop_reason="stairs",
-                        steps_taken=steps_taken,
-                        turns_elapsed=self.turn - turns_start,
-                        position=self.position,
-                        message=f"Found stairs after {steps_taken} steps",
-                    )
-                if current_tile.feature in ('altar', 'throne', 'fountain', 'sink'):
-                    return AutoexploreResult(
-                        stop_reason="feature",
-                        steps_taken=steps_taken,
-                        turns_elapsed=self.turn - turns_start,
-                        position=self.position,
-                        message=f"Found {current_tile.feature} after {steps_taken} steps",
-                    )
+            # Note: sessile monsters (molds, fungi) and distant hostiles don't interrupt
 
             # Target stickiness: only find new target if we don't have one or current is invalid
             need_new_target = False
@@ -1485,12 +1437,6 @@ class NetHackAPI:
             message=f"Explored {steps_taken} steps, reached max ({max_steps})",
         )
 
-    def find_nearest_monster(self) -> Optional[Position]:
-        """Find nearest hostile monster."""
-        if not self.observation:
-            return None
-        return find_nearest_monster(self.observation)
-
     def travel_to(self, char: str) -> ActionResult:
         """
         Travel to the nearest tile with the given character (NetHack-style travel).
@@ -1602,32 +1548,9 @@ class NetHackAPI:
             return []
         return find_items_on_map(self.observation)
 
-    # ==================== Knowledge Base ====================
+    # ==================== Prayer Tracking ====================
 
-    def lookup_monster(self, name: str) -> Optional[MonsterInfo]:
-        """Look up monster information."""
-        return lookup_monster(name)
-
-    def is_dangerous_melee(self, monster_name: str) -> bool:
-        """Check if monster is dangerous to attack in melee."""
-        return is_dangerous_melee(monster_name)
-
-    def is_corpse_safe(self, monster_name: str) -> bool:
-        """Check if monster corpse is safe to eat."""
-        return is_corpse_safe(monster_name)
-
-    def get_corpse_effects(self, monster_name: str) -> list[str]:
-        """Get effects of eating a monster's corpse."""
-        return get_corpse_effects(monster_name)
-
-    def is_prayer_safe(self) -> bool:
-        """Check if prayer timeout has passed."""
-        return is_prayer_safe(self._last_prayer_turn, self.turn)
-
-    def elbereth_effective(self, monster_name: str) -> bool:
-        """Check if Elbereth scares a monster."""
-        return elbereth_effective_against(monster_name)
-
-    def estimate_difficulty(self, monster_name: str) -> int:
-        """Estimate monster difficulty (0-10)."""
-        return estimate_monster_difficulty(monster_name)
+    @property
+    def turns_since_last_prayer(self) -> int:
+        """Turns elapsed since last prayer. Use to check prayer timeout (~500 turns needed)."""
+        return self.turn - self._last_prayer_turn

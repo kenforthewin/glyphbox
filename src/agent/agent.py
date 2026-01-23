@@ -369,12 +369,16 @@ class NetHackAgent:
         game_screen = ""
         current_position = None
         hostile_monsters = []
-        adjacent_tiles = {}
+        adjacent_tiles = None
+        inventory = None
         if self._api:
             game_screen = self._api.get_screen()
             current_position = self._api.position
             hostile_monsters = self._api.get_hostile_monsters()
-            adjacent_tiles = self._api.get_adjacent_tiles()
+            if self.config.show_adjacent_tiles:
+                adjacent_tiles = self._api.get_adjacent_tiles()
+            if self.config.show_inventory:
+                inventory = self._api.get_inventory()
 
         # Format prompt with game screen
         prompt = self.prompts.format_decision_prompt(
@@ -384,6 +388,7 @@ class NetHackAgent:
             current_position=current_position,
             hostile_monsters=hostile_monsters,
             adjacent_tiles=adjacent_tiles,
+            inventory=inventory,
         )
 
         # Get LLM response with tool calling

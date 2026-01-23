@@ -406,9 +406,15 @@ def parse_glyph(glyph: int, char: Optional[str] = None, description: Optional[st
 
     if nethack.glyph_is_cmap(glyph):
         cmap_id = nethack.glyph_to_cmap(glyph)
-        # Use screen_description (authoritative) if provided, fallback to NLE cache
-        name = description if description else _CMAP_NAME_CACHE.get(cmap_id, f"terrain {cmap_id}")
-        is_walkable = cmap_id in _WALKABLE_CMAP
+        # Special case: cmap 0 is unexplored stone, not "dark part of a room"
+        # NLE's symdef misleadingly gives cmap 0 the same explanation as cmap 20
+        if cmap_id == 0:
+            name = "solid stone"
+            is_walkable = False
+        else:
+            # Use screen_description (authoritative) if provided, fallback to NLE cache
+            name = description if description else _CMAP_NAME_CACHE.get(cmap_id, f"terrain {cmap_id}")
+            is_walkable = cmap_id in _WALKABLE_CMAP
         return GlyphInfo(
             glyph=glyph,
             glyph_type=GlyphType.CMAP,

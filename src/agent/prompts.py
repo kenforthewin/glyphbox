@@ -130,6 +130,7 @@ class PromptManager:
         current_position: Optional[Any] = None,
         hostile_monsters: Optional[list[Any]] = None,
         adjacent_tiles: Optional[dict[str, str]] = None,
+        inventory: Optional[list[Any]] = None,
     ) -> str:
         """
         Format a decision prompt with current game context.
@@ -141,6 +142,7 @@ class PromptManager:
             current_position: Current player Position (x, y)
             hostile_monsters: List of hostile Monster objects
             adjacent_tiles: Dict mapping direction names to tile descriptions
+            inventory: List of Item objects in player's inventory
 
         Returns:
             Formatted decision prompt
@@ -225,6 +227,7 @@ class PromptManager:
             result_text = "None"
 
         # Format hostile monsters with relative directions only (no coordinates)
+        # Include the display character so agent knows what to look for on map
         monsters_text = ""
         if hostile_monsters and current_position:
             monster_lines = []
@@ -232,10 +235,11 @@ class PromptManager:
                 direction = current_position.direction_to(m.position)
                 distance = current_position.distance_to(m.position)
                 dir_name = direction.name if direction else "?"
+                # Include char so agent knows what to look for on map (e.g. fox='d', kitten='f')
                 if distance == 1:
-                    monster_lines.append(f"  - {m.name} [{dir_name}, adjacent]")
+                    monster_lines.append(f"  - {m.name} '{m.char}' [{dir_name}, adjacent]")
                 else:
-                    monster_lines.append(f"  - {m.name} [{dir_name}, {distance} tiles]")
+                    monster_lines.append(f"  - {m.name} '{m.char}' [{dir_name}, {distance} tiles]")
             if monster_lines:
                 monsters_text = "Hostile Monsters:\n" + "\n".join(monster_lines)
 
@@ -260,12 +264,24 @@ class PromptManager:
                     adj_lines.append(f"  {direction}: {adjacent_tiles[direction]}")
             adjacent_text = "\n".join(adj_lines)
 
+        # Format inventory
+        inventory_text = ""
+        if inventory:
+            inv_lines = ["Inventory:"]
+            for item in inventory:
+                if item.quantity > 1:
+                    inv_lines.append(f"  {item.slot}: {item.quantity} {item.name}")
+                else:
+                    inv_lines.append(f"  {item.slot}: {item.name}")
+            inventory_text = "\n".join(inv_lines)
+
         kwargs = {
             "game_screen": game_screen or "Screen not available",
             "position": position_text,
             "adjacent_tiles": adjacent_text,
             "last_result": result_text,
             "hostile_monsters": monsters_text,
+            "inventory": inventory_text,
             "skills_section": skills_section,
         }
 
@@ -437,16 +453,35 @@ Your code has access to `nh` (NetHackAPI) and these pre-loaded types:
 IMPORTANT: All API calls are SYNCHRONOUS. Do NOT use await or async. Do NOT use imports.
 Use dir(nh) to explore available methods if needed.
 
+### Navigation (USE THESE - they handle pathfinding for you!)
+
+**nh.travel_to(char)** - Travel to a map feature. This is your PRIMARY movement tool!
+  result = nh.travel_to('>')  # Go to stairs down
+  result = nh.travel_to('<')  # Go to stairs up
+  result = nh.travel_to('+')  # Go to a door
+  result = nh.travel_to('$')  # Go to gold
+  if result.success: nh.go_down()  # Then use stairs
+
+**nh.autoexplore()** - Explore the level automatically. Use for any exploration!
+  result = nh.autoexplore()
+  # Stops for: "hostile" (nearby), "low_hp", "hungry", "fully_explored", "blocked"
+  # Does NOT stop for items, stairs, features - explores until done or danger
+  if result.stop_reason == "hostile": nh.attack(direction)
+
+**nh.move_to(Position)** - Pathfind to a specific coordinate
+  nh.move_to(Position(42, 12))  # Walk to that spot
+
+PREFER navigation tools over manual movement! They handle doors, corridors, etc.
+
 ### Actions (all return ActionResult)
 
 ActionResult has: .success (bool), .messages (list[str]), .turn_elapsed (bool)
 Check .messages for feedback like "You hit the goblin!" or "It's a wall."
 
-**Movement:**
-nh.move(Direction)           # Move in direction, fails if blocked
-nh.move_toward(Position)     # Move one step toward target
-nh.go_up()                   # Climb stairs up (<)
-nh.go_down()                 # Descend stairs (>)
+**Movement (only for single-step moves when you know the way is clear):**
+nh.move(Direction)           # Single step - use travel_to() instead for multi-step!
+nh.go_up()                   # Climb stairs up (<) - use AFTER travel_to('<')
+nh.go_down()                 # Descend stairs (>) - use AFTER travel_to('>')
 
 **Combat:**
 nh.attack(Direction)         # Attack in direction
@@ -454,7 +489,13 @@ nh.kick(Direction)           # Kick (doors, monsters)
 nh.fire(Direction)           # Fire wielded ranged weapon
 nh.throw('a', Direction)     # Throw item by inventory letter
 
-**Items (ground items have slot=None, use pickup() without args):**
+**Items:**
+nh.get_inventory()           # List[Item] - your items (have .slot letter)
+nh.get_items_here()          # List[Item] - items on ground at your position
+nh.get_food()                # List[Item] - food in inventory
+Item has: .name, .slot (inventory letter), .quantity
+
+**Item Actions:**
 nh.pickup()                  # Pick up all items at current position
 nh.drop('a')                 # Drop item by inventory letter
 nh.eat('a')                  # Eat food from inventory
@@ -483,206 +524,90 @@ nh.search()                  # Search for secrets
 
 ### State Queries (don't consume turns)
 
-**Stats:**
-stats = nh.get_stats()
-  stats.hp, stats.max_hp         # Hit points
-  stats.position.x, stats.position.y  # Coordinates (NOT stats.x!)
-  stats.dungeon_level            # Current level
-  stats.hunger                   # HungerState enum (see below)
-  stats.gold, stats.ac, stats.xp_level  # Gold, armor class, experience
-  stats.is_hungry                # bool - True if Hungry/Weak/Fainting (USE THIS!)
-  stats.is_weak                  # bool - True if Weak/Fainting (critical!)
+**Properties (use these for conditionals in loops):**
+nh.hp                        # int - current hit points
+nh.max_hp                    # int - maximum hit points
+nh.is_hungry                 # bool - True if Hungry/Weak/Fainting
+nh.is_weak                   # bool - True if Weak/Fainting (critical!)
+nh.has_adjacent_hostile      # bool - True if hostile monster adjacent
+nh.turns_since_last_prayer   # int - turns since last prayer (~500 needed)
+nh.dungeon_level             # int - current dungeon level
+nh.position                  # Position - current (x, y)
+nh.turn                      # int - current game turn
 
-Hunger: Use stats.is_hungry (True if HUNGRY+) or stats.is_weak (True if WEAK+)
+Example - combat loop:
+  while nh.hp > nh.max_hp * 0.3 and nh.has_adjacent_hostile:
+      nh.attack(direction)
 
-**Monsters:**
-nh.get_visible_monsters()    # List[Monster] - all visible (includes pets/peaceful)
-nh.get_adjacent_hostiles()   # List[Monster] - hostile monsters adjacent to you (for combat)
-nh.get_hostile_monsters()    # List[Monster] - all hostile monsters visible
+NOTE: HP, position, monsters are ALREADY SHOWN in the game view above.
+DO NOT query for them just to print them - use the view you already have!
 
-Monster has: .name, .position, .is_hostile, .is_peaceful, .is_tame
+**Prompt Responses:** When you see "[ynq]" or "[yn]" in a message, game awaits input:
+nh.confirm()                 # Send 'y' - accept
+nh.deny()                    # Send 'n' - decline
+nh.escape()                  # Send ESC - cancel
+nh.space()                   # Send space - dismiss --More--
 
-**Items:**
-nh.get_inventory()           # List[Item] - your items (have .slot)
-nh.get_items_here()          # List[Item] - items on ground (slot=None, use pickup())
-nh.get_food()                # List[Item] - food in inventory
-nh.get_weapons()             # List[Item] - weapons in inventory
+### Query Methods
 
-Item has: .name, .slot (inventory letter), .quantity
-
-**Environment:**
-nh.get_message()             # Latest game message
-nh.get_messages(10)          # Last 10 messages
-nh.get_screen()              # ASCII screen as single string
-nh.get_screen_lines()        # list[str] - 24 rows, useful for parsing
-nh.get_position()            # Current Position
-nh.get_tile(Position)        # Tile at position (see Tile below)
-nh.get_items_on_map()        # List[Item] - items visible on map (not inventory)
-
-**Tile** (from get_tile):
-  tile.char                    # str - the ASCII character
-  tile.is_walkable             # bool - can walk here?
-  tile.is_explored             # bool - have we seen this tile?
-  tile.position                # Position
-
-**Position**: nh.position returns Position(x, y). Methods: pos.distance_to(other), pos.direction_to(other)
-
-**Prompt Responses (for [ynq] and similar prompts):**
-nh.confirm()                 # Send 'y' - accept/confirm
-nh.deny()                    # Send 'n' - decline/cancel
-nh.escape()                  # Send ESC - cancel action
-nh.space()                   # Send space - dismiss message
-nh.send_keys("abc")          # Send raw keys (advanced)
-
-IMPORTANT: When you see "[ynq]" or "[yn]" in a message, the game is waiting for input!
-  msg = nh.get_message()
-  if "[yn" in msg or "[ynq]" in msg:
-      nh.confirm()  # or nh.deny() depending on what you want
-
-### Movement & Navigation
-
-nh.move_to(target)           # Move to position (pathfinds automatically). Returns ActionResult.
-nh.travel_to('>')            # Find nearest '>' and pathfind there (NetHack-style travel)
-nh.find_nearest_item()       # Returns TargetResult with nearest item position
-nh.find_nearest_monster()    # Position or None
+nh.find_nearest_item()       # Returns TargetResult with .position and .success
 nh.find_doors()              # list[(Position, is_open)] - all doors on level
 
-**travel_to(char)** - NetHack-style travel command (like pressing `_>.` in NetHack):
-  nh.travel_to('>')          # Go to stairs down
-  nh.travel_to('<')          # Go to stairs up
-  nh.travel_to('{')          # Go to fountain
-  nh.travel_to('$')          # Go to gold
-  Returns ActionResult. USE THIS for navigating to map features!
+### NAVIGATION REMINDER
 
-Example - going to stairs and descending:
-  result = nh.travel_to('>')
-  if result.success:
-      nh.go_down()
+DO NOT manually navigate with move(Direction) unless target is 1 tile away!
+- To reach stairs: `nh.travel_to('>')` then `nh.go_down()`
+- To explore: `nh.autoexplore()`
+- To reach a position: `nh.move_to(position)`
 
-Example - opening a door after finding it:
-  doors = nh.find_doors()
-  for pos, is_open in doors:
-      if not is_open:  # Found closed door
-          # Move adjacent to door, then open it
-          result = nh.move_to(pos)  # Will stop adjacent since door is unwalkable
-          if nh.position.distance_to(pos) == 1:
-              nh.open_door(nh.position.direction_to(pos))
-
-**TargetResult** - returned by find_nearest_item:
-  result.position   # Position or None
-  result.success    # bool - True if target found
-  result.message    # Human-readable explanation
-  if result:        # Truthy if position found
-
-### Autoexplore (USE THIS for exploration)
-
-nh.autoexplore()  # Explore until interrupted, returns AutoexploreResult
-
-**AutoexploreResult**:
-  result.stop_reason   # Why it stopped (see below)
-  result.steps_taken   # Number of movement steps
-  result.turns_elapsed # Game turns elapsed
-  result.position      # Final position
-  result.message       # Human-readable explanation
-  result.success       # True if fully_explored/feature/stairs
-
-**stop_reason values**:
-  "fully_explored" - All VISIBLE areas explored (hidden rooms may exist)
-  "hostile"        - Hostile monster appeared
-  "low_hp"         - HP dropped below 30%
-  "hungry"         - Hunger worsened (HUNGRY if started not-hungry, WEAK if started hungry)
-  "feature"        - Found altar, throne, fountain, etc.
-  "stairs"         - Found stairs
-  "item"           - Found item on ground
-  "dead_end"       - Reached dead end (3+ adjacent walls)
-  "max_steps"      - Hit max_steps limit (default 500)
-  "blocked"        - Cannot move into unexplored area
-
-**PREFER autoexplore() over manual exploration loops!**
-It handles pathfinding, movement, and stopping automatically:
-  result = nh.autoexplore()
-  if result.stop_reason == "hostile":
-      # Fight the monster
-  elif result.stop_reason == "stairs":
-      # Decide whether to descend
-  elif result.stop_reason == "fully_explored":
-      # Visible areas done - check for hidden rooms or go down
-
-### Knowledge (monster/item info)
-
-nh.is_dangerous_melee(name)  # bool - dangerous to fight?
-nh.is_corpse_safe(name)      # bool - safe to eat?
-nh.is_prayer_safe()          # bool - can pray now?
-nh.estimate_difficulty(name) # int 0-10
-
-### Properties
-
-nh.role                      # str - your class (e.g. "Valkyrie", "Barbarian")
-nh.is_done                   # bool - game over?
-nh.turn                      # int - current turn
-nh.position                  # Position - current location
+Manual move() is ONLY for:
+- Attacking adjacent enemies: `nh.attack(Direction.W)`
+- Moving one tile when you can SEE it's clear
 
 ## Reading the Map
 
-Study the game screen to understand your surroundings:
-- Room shapes and corridor connections
+The map shows what's on the level:
 - Doors ('+' closed), stairs ('<' up, '>' down)
 - Items on the ground ('$' gold, '%' food, ')' weapons, etc.)
 - Monsters (letters like 'g' goblin, 'o' orc, 'd' dog)
-- Your position ('@') relative to everything else
+- Blank spaces are UNEXPLORED STONE - not empty walkable area!
 
-Think spatially: Where are the exits? Is there a chokepoint? What's between you and your goal?
+**IMPORTANT: Do NOT try to manually navigate by reading the map!**
+You cannot reliably determine paths from ASCII text. Instead:
+- Use `travel_to('>')` to reach stairs, doors, items
+- Use `autoexplore()` to find unexplored areas
+- Use `move_to(position)` if you have exact coordinates
 
-## Using the API
+Only use `move(Direction)` for adjacent targets you can verify in "Adjacent tiles".
 
-The API provides powerful tools for querying game state and taking actions:
+## EFFICIENCY - Keep Code Minimal
 
-**Finding things:**
-  hostiles = nh.get_hostile_monsters()  # All hostile monsters with positions
-  doors = nh.find_doors()               # All doors with open/closed state
-  items = nh.get_items_on_map()         # All visible items with positions
+The game view already shows HP, position, monsters. DO NOT print redundant info!
+BAD: `stats = nh.get_stats(); print(f"HP: {stats.hp}")` - already in status bar!
+GOOD: `nh.attack(Direction.W)` - just take the action
 
-**Navigation:**
-  nh.move_to(target.position)           # Pathfind to any position
-  nh.travel_to('>')                     # Go to stairs (or any map feature)
-  nh.autoexplore()                      # Explore automatically
+## LOOPS MUST CHECK FOR DANGER
 
-**Spatial helpers:**
-  distance = nh.position.distance_to(target.position)
-  direction = nh.position.direction_to(target.position)
+Any loop that takes multiple actions MUST check for hostiles between iterations.
+Monsters can appear or wake up at any time - blind loops will get you killed!
 
-**Example - engaging a monster:**
-  hostiles = nh.get_hostile_monsters()
-  if hostiles:
-      target = hostiles[0]
-      if nh.position.distance_to(target.position) == 1:
-          direction = nh.position.direction_to(target.position)
-          nh.attack(direction)
-      else:
-          nh.move_to(target.position)
+BAD:
+  for _ in range(15): nh.search()  # Could die if monster appears!
 
-**Example - descending stairs:**
-  result = nh.travel_to('>')
-  if result.success:
-      nh.go_down()
+GOOD:
+  for _ in range(15):
+      if nh.has_adjacent_hostile: break
+      nh.search()
 
-## Key Principles
-
-1. OBSERVE - Look at the map. Understand the layout, threats, and opportunities.
-
-2. USE THE API - Query game state, navigate with pathfinding, use direction_to() for actions.
-
-3. CHECK FEEDBACK - ActionResult.messages tells you what happened.
-
-4. SURVIVAL FIRST - Monitor HP and hunger. Eat when hungry. Retreat when low.
-
-5. MAKE PROGRESS - Every turn should advance your goals. Explore, fight, descend."""
+ALSO GOOD: Just call autoexplore() or let the outer agent loop handle it - you'll get
+called again next turn with updated state."""
 
 DECISION_PROMPT = """=== CURRENT GAME VIEW ===
 {position}
 {game_screen}
 {adjacent_tiles}
 {hostile_monsters}
+{inventory}
 {skills_section}
 Last Result:
 {last_result}
@@ -715,7 +640,6 @@ Available API methods on `nh`:
 - Items: pickup(), eat(slot), quaff(slot), wield(slot), wear(slot)
 - Utility: wait(), search(), open_door(direction)
 - Navigation: move_to(target), travel_to(char), autoexplore()
-- Knowledge: is_dangerous_melee(name), is_corpse_safe(name)
 
 Respond with a JSON decision including the full skill code in the "code" field."""
 

@@ -6,7 +6,7 @@ agent:
   # LLM provider: "openrouter" or "anthropic"
   provider: "openrouter"
   # LLM model to use for strategic decisions (OpenRouter format)
-  model: "openai/gpt-4o-mini"
+  model: "anthropic/claude-opus-4.5"
   # OpenRouter base URL
   base_url: "https://openrouter.ai/api/v1"
   # Temperature for LLM sampling (0.0 = deterministic, 1.0 = creative)
@@ -30,10 +30,14 @@ agent:
 
   # Message history: 0 = unlimited (compress old), N = keep only last N turns
   # Old user messages are compressed to just last_result (map stripped)
-  max_history_turns: 0
+  max_history_turns: 20
   # How many recent turns keep their full map (0 = only current turn has map)
   # Higher values give more spatial context but use more tokens
-  maps_in_history: 1
+  maps_in_history: 0
+  # Show inventory in context each turn (helps agent track items without querying)
+  show_inventory: false
+  # Show adjacent tiles (N, S, E, W, etc.) with descriptions
+  show_adjacent_tiles: true
 
 # Environment settings
 environment:
