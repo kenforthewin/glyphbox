@@ -18,12 +18,13 @@ class ReasoningEffort(Enum):
     Controls how much "thinking" the model does before responding.
     Maps to OpenRouter's reasoning.effort parameter.
     """
-    NONE = "none"        # Disabled - no thinking tokens
+
+    NONE = "none"  # Disabled - no thinking tokens
     MINIMAL = "minimal"  # ~10% of max_tokens for thinking
-    LOW = "low"          # ~20% of max_tokens for thinking
-    MEDIUM = "medium"    # ~50% of max_tokens for thinking
-    HIGH = "high"        # ~80% of max_tokens for thinking (recommended)
-    XHIGH = "xhigh"      # ~95% of max_tokens for thinking
+    LOW = "low"  # ~20% of max_tokens for thinking
+    MEDIUM = "medium"  # ~50% of max_tokens for thinking
+    HIGH = "high"  # ~80% of max_tokens for thinking (recommended)
+    XHIGH = "xhigh"  # ~95% of max_tokens for thinking
 
 
 @dataclass
@@ -64,6 +65,8 @@ class AgentConfig:
     show_adjacent_tiles: bool = True
     # Show items visible on the map with their coordinates (food, weapons, etc.)
     show_items_on_map: bool = True
+    # Show dungeon overview (#overview) with visited levels, branches, and features
+    show_dungeon_overview: bool = True
     # Local map mode: show only tiles around player with coordinate guides (LLM-optimized)
     local_map_mode: bool = False
     # Tiles in each direction from player (7 = 15x15 total view)
@@ -77,6 +80,33 @@ class AgentConfig:
         except ValueError:
             logger.warning(f"Invalid reasoning value '{self.reasoning}', defaulting to none")
             return None
+
+
+@dataclass
+class AuthConfig:
+    """Authentication configuration (OpenRouter OAuth + JWT sessions).
+
+    Auth is entirely optional. If session_secret is empty, all auth
+    middleware becomes a no-op and the app works as a single-user instance.
+    """
+
+    # Required for auth to be enabled
+    session_secret: str = ""  # HS256 signing key for JWT cookies
+    encryption_key: str = ""  # Fernet key for encrypting stored API keys
+
+    # OAuth endpoints
+    openrouter_auth_url: str = "https://openrouter.ai/auth"
+    openrouter_keys_url: str = "https://openrouter.ai/api/v1/auth/keys"
+    callback_url: str = ""  # e.g. https://yoursite.com/api/auth/callback
+
+    # Cookie settings
+    cookie_domain: str = ""  # empty = use request host
+    cookie_secure: bool = True  # set False for local HTTP dev
+    jwt_expiry_days: int = 7
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.session_secret)
 
 
 @dataclass
@@ -123,14 +153,61 @@ class LoggingConfig:
 
 
 @dataclass
+class DatabaseConfig:
+    """PostgreSQL database configuration."""
+
+    host: str = "localhost"
+    port: int = 5432
+    database: str = "nethack_agent"
+    user: str = "nethack"
+    password: str = "nethack"
+    pool_min_size: int = 2
+    pool_max_size: int = 10
+
+    @property
+    def url(self) -> str:
+        """Async SQLAlchemy connection URL."""
+        return (
+            f"postgresql+asyncpg://{self.user}:{self.password}"
+            f"@{self.host}:{self.port}/{self.database}"
+        )
+
+    @property
+    def conninfo(self) -> str:
+        """Standard PostgreSQL connection string (libpq / psycopg format)."""
+        return (
+            f"postgresql://{self.user}:{self.password}"
+            f"@{self.host}:{self.port}/{self.database}"
+        )
+
+
+@dataclass
+class WorkerConfig:
+    """Procrastinate worker configuration.
+
+    When enabled, agent runs are dispatched to separate worker processes
+    via Procrastinate (PostgreSQL-backed task queue) instead of running
+    in the web server process.
+    """
+
+    enabled: bool = True  # True = Procrastinate workers, False = in-process
+    concurrency: int = 1  # max concurrent jobs per worker process
+    queue: str = "agent_runs"
+    monitor_interval: float = 10.0  # seconds between background status checks
+
+
+@dataclass
 class Config:
     """Main configuration container."""
 
     agent: AgentConfig = field(default_factory=AgentConfig)
     environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    worker: WorkerConfig = field(default_factory=WorkerConfig)
 
 
 def load_config(config_path: Optional[str] = None) -> Config:
@@ -172,6 +249,12 @@ def load_config(config_path: Optional[str] = None) -> Config:
                 config.skills = SkillsConfig(**data["skills"])
             if "logging" in data:
                 config.logging = LoggingConfig(**data["logging"])
+            if "database" in data:
+                config.database = DatabaseConfig(**data["database"])
+            if "auth" in data:
+                config.auth = AuthConfig(**data["auth"])
+            if "worker" in data:
+                config.worker = WorkerConfig(**data["worker"])
 
     # Environment variable overrides
     if os.environ.get("NETHACK_AGENT_PROVIDER"):
@@ -184,6 +267,34 @@ def load_config(config_path: Optional[str] = None) -> Config:
         config.logging.level = os.environ["NETHACK_AGENT_LOG_LEVEL"]
     if os.environ.get("NETHACK_SANDBOX_TYPE"):
         config.sandbox.type = os.environ["NETHACK_SANDBOX_TYPE"]
+    if os.environ.get("NETHACK_AGENT_DB_HOST"):
+        config.database.host = os.environ["NETHACK_AGENT_DB_HOST"]
+    if os.environ.get("NETHACK_AGENT_DB_PORT"):
+        config.database.port = int(os.environ["NETHACK_AGENT_DB_PORT"])
+    if os.environ.get("NETHACK_AGENT_DB_NAME"):
+        config.database.database = os.environ["NETHACK_AGENT_DB_NAME"]
+    if os.environ.get("NETHACK_AGENT_DB_USER"):
+        config.database.user = os.environ["NETHACK_AGENT_DB_USER"]
+    if os.environ.get("NETHACK_AGENT_DB_PASSWORD"):
+        config.database.password = os.environ["NETHACK_AGENT_DB_PASSWORD"]
+
+    # Auth overrides
+    if os.environ.get("AUTH_SESSION_SECRET"):
+        config.auth.session_secret = os.environ["AUTH_SESSION_SECRET"]
+    if os.environ.get("AUTH_ENCRYPTION_KEY"):
+        config.auth.encryption_key = os.environ["AUTH_ENCRYPTION_KEY"]
+    if os.environ.get("AUTH_CALLBACK_URL"):
+        config.auth.callback_url = os.environ["AUTH_CALLBACK_URL"]
+    if os.environ.get("AUTH_COOKIE_SECURE"):
+        config.auth.cookie_secure = os.environ["AUTH_COOKIE_SECURE"].lower() == "true"
+
+    # Worker overrides
+    if os.environ.get("NETHACK_WORKER_ENABLED"):
+        config.worker.enabled = os.environ["NETHACK_WORKER_ENABLED"].lower() == "true"
+    if os.environ.get("NETHACK_WORKER_CONCURRENCY"):
+        config.worker.concurrency = int(os.environ["NETHACK_WORKER_CONCURRENCY"])
+    if os.environ.get("NETHACK_WORKER_QUEUE"):
+        config.worker.queue = os.environ["NETHACK_WORKER_QUEUE"]
 
     # Note: API key should be set via OPENROUTER_API_KEY env var
     # (read by the LLM client, not stored in config for security)

@@ -6,7 +6,7 @@ agent:
   # LLM provider: "openrouter" or "anthropic"
   provider: "openrouter"
   # LLM model to use for strategic decisions (OpenRouter format)
-  model: "anthropic/claude-opus-4.5"
+  model: "google/gemini-3-flash-preview"
   # OpenRouter base URL
   base_url: "https://openrouter.ai/api/v1"
   # Temperature for LLM sampling (0.0 = deterministic, 1.0 = creative)
@@ -42,6 +42,8 @@ agent:
   show_inventory: true
   # Show adjacent tiles (N, S, E, W, etc.) with descriptions
   show_adjacent_tiles: true
+  # Show dungeon overview (#overview) with visited levels, branches, and features
+  show_dungeon_overview: true
   # Local map mode: show only tiles around player with coordinate guides (LLM-optimized)
   local_map_mode: false
   # Tiles in each direction from player (7 = 15x15 total view)
@@ -68,6 +70,25 @@ skills:
   min_success_rate_to_save: 0.3
   # Maximum actions per skill execution
   max_actions_per_skill: 500
+
+# Database settings (PostgreSQL)
+database:
+  host: "localhost"
+  port: 5432
+  database: "nethack_agent"
+  user: "nethack"
+  password: "nethack"
+  pool_min_size: 2
+  pool_max_size: 10
+
+# Worker settings (Procrastinate task queue)
+# When enabled (default), agent runs execute in separate worker processes via PostgreSQL.
+# When disabled, runs execute in the web server process.
+worker:
+  enabled: true
+  concurrency: 1
+  queue: "agent_runs"
+  monitor_interval: 10.0
 
 # Logging settings
 logging:

@@ -1155,3 +1155,76 @@ class ActionExecutor:
     def space(self) -> ActionResult:
         """Send space (continue/dismiss message)."""
         return self._execute_single(ord(" "))
+
+    # ==================== Screen Capture ====================
+
+    def get_overview_screen(self) -> str:
+        """
+        Execute #overview and capture the paged screen output.
+
+        This is a free action (doesn't consume a game turn). Uses a screen
+        diff approach: compares tty_chars before and after the command to
+        isolate the overview text from the underlying game map.
+        Returns empty string if the command is not available.
+        """
+        import numpy as np
+
+        # Clear pending prompts
+        self._handle_all_prompts()
+
+        # Send the #overview command
+        idx = self._get_action_idx(nethack.Command.OVERVIEW)
+        if idx is None:
+            return ""
+
+        # Snapshot the screen before the overlay
+        pre_obs = self.env.last_observation
+        if pre_obs is None:
+            return ""
+        base_chars = pre_obs.tty_chars.copy()
+
+        try:
+            self.env.step(idx)
+        except Exception:
+            return ""
+
+        # Capture overview text from each page by diffing against
+        # the base game screen. The overview is rendered as an overlay,
+        # so changed characters are the overview text.
+        overview_lines = []
+        space_idx = self._get_action_idx(ord(" "))
+
+        for _ in range(10):  # max pages
+            obs = self.env.last_observation
+            if obs is None or not obs.in_more_prompt:
+                break
+
+            # Find characters that differ from the base screen
+            diff_mask = obs.tty_chars != base_chars
+            for row in range(24):
+                if not diff_mask[row].any():
+                    continue
+                # Extract the changed portion of this row
+                changed_cols = np.where(diff_mask[row])[0]
+                start = int(changed_cols[0])
+                end = int(changed_cols[-1]) + 1
+                text = bytes(obs.tty_chars[row, start:end]).decode(
+                    "latin-1", errors="replace"
+                ).strip()
+                if text and "--More--" not in text:
+                    overview_lines.append(text)
+
+            # Advance past --More--
+            if space_idx is not None:
+                self.env.step(space_idx)
+            else:
+                break
+
+        # Dismiss if still in a prompt (ESC to close)
+        obs = self.env.last_observation
+        if obs and obs.in_any_prompt:
+            esc_idx = self._get_action_idx(27)
+            if esc_idx is not None:
+                self.env.step(esc_idx)
+
+        return "\n".join(overview_lines)

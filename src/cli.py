@@ -4,6 +4,7 @@ Command-line interface for the NetHack agent.
 Usage:
     uv run python -m src.cli watch        Watch agent in TUI mode
     uv run python -m src.cli watch --record   Watch with asciinema recording
+    uv run python -m src.cli serve        Start web server with live agent
     uv run python -m src.cli verify       Verify setup is correct
 """
 
@@ -28,7 +29,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     import os
 
     # Handle --record flag by re-invoking under asciinema
-    if getattr(args, 'record', False):
+    if getattr(args, "record", False):
         return _run_with_recording(args)
 
     # Override model via CLI if specified
@@ -81,7 +82,8 @@ def _run_with_recording(args: argparse.Namespace) -> int:
         asciinema_path,
         "rec",
         "--overwrite",
-        "-c", " ".join(inner_cmd),
+        "-c",
+        " ".join(inner_cmd),
         str(recording_file),
     ]
 
@@ -99,6 +101,81 @@ def _run_with_recording(args: argparse.Namespace) -> int:
         print()
         print(f"Recording saved to: {recording_file}")
         return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Start the web server. Users start runs via the web UI after logging in."""
+    import asyncio
+
+    import uvicorn
+
+    async def setup_and_run():
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from src.config import load_config as load_cfg
+        from src.persistence.postgres import PostgresRepository
+        from src.web.app import create_app
+
+        cfg = load_cfg()
+        engine = create_async_engine(
+            cfg.database.url,
+            pool_size=cfg.database.pool_max_size,
+        )
+
+        app = create_app(engine=engine)
+        app.state.repo = PostgresRepository(engine)
+        app.state.auth_config = cfg.auth
+
+        print(f"API docs: http://{args.host}:{args.port}/docs")
+        print(f"Frontend: http://{args.host}:{args.port}/")
+        print()
+
+        config = uvicorn.Config(app, host=args.host, port=args.port, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+
+        await engine.dispose()
+
+    try:
+        asyncio.run(setup_and_run())
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+
+    return 0
+
+
+def cmd_worker(args: argparse.Namespace) -> int:
+    """Start a Procrastinate worker process to execute agent runs."""
+    import asyncio
+
+    async def run_worker():
+        from src.config import load_config as load_cfg
+        from src.worker.app import configure
+
+        cfg = load_cfg()
+        conninfo = cfg.database.conninfo
+
+        concurrency = args.concurrency or cfg.worker.concurrency
+        queue = args.queue or cfg.worker.queue
+
+        app = configure(conninfo)
+
+        print(f"Starting worker (concurrency={concurrency}, queue={queue})")
+        print(f"Database: {cfg.database.host}:{cfg.database.port}/{cfg.database.database}")
+        print()
+
+        async with app.open_async():
+            await app.run_worker_async(
+                queues=[queue],
+                concurrency=concurrency,
+            )
+
+    try:
+        asyncio.run(run_worker())
+    except KeyboardInterrupt:
+        print("\nWorker stopped.")
+
+    return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -152,6 +229,41 @@ def main() -> int:
         help="Record the session with asciinema (saves to data/recordings/)",
     )
     watch_parser.set_defaults(func=cmd_watch)
+
+    # serve command
+    serve_parser = subparsers.add_parser("serve", help="Start web server with live agent")
+    serve_parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Bind host (default: 0.0.0.0)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=8000,
+        help="Bind port (default: 8000)",
+    )
+    serve_parser.set_defaults(func=cmd_serve)
+
+    # worker command
+    worker_parser = subparsers.add_parser(
+        "worker", help="Start a Procrastinate worker process for agent runs"
+    )
+    worker_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="Max concurrent jobs per worker (default: from config)",
+    )
+    worker_parser.add_argument(
+        "--queue",
+        type=str,
+        default=None,
+        help="Queue name to consume from (default: from config)",
+    )
+    worker_parser.set_defaults(func=cmd_worker)
 
     # verify command
     verify_parser = subparsers.add_parser("verify", help="Verify setup")

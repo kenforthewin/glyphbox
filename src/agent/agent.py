@@ -162,17 +162,19 @@ class NetHackAgent:
 
         return self.end_episode()
 
-    def start_episode(self, api: Any) -> None:
+    def start_episode(self, api: Any, episode_id: str | None = None) -> None:
         """
         Start a new episode.
 
         Args:
             api: NetHackAPI instance
+            episode_id: Optional pre-generated episode/run ID. If None, one is
+                generated from the current timestamp.
         """
         self._api = api
         self.state = AgentState(running=True)
         self._result = AgentResult(
-            episode_id=f"ep_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            episode_id=episode_id or f"ep_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             started_at=datetime.now(),
         )
 
@@ -379,6 +381,7 @@ class NetHackAgent:
         altars = []
         reminders = []
         notes = []
+        dungeon_overview = None
         if self._api:
             if self.config.local_map_mode:
                 game_screen = self._api.get_local_map(self.config.local_map_radius)
@@ -398,6 +401,9 @@ class NetHackAgent:
             # Get fired reminders and active notes
             reminders = self._api.get_fired_reminders()
             notes = self._api.get_active_notes()
+            # Get dungeon overview (#overview command)
+            if self.config.show_dungeon_overview:
+                dungeon_overview = self._api.get_overview()
 
         # Format last result text (before building the full prompt)
         result_text = self.prompts.format_last_result(last_result) if last_result else None
@@ -416,6 +422,7 @@ class NetHackAgent:
             altars=altars,
             reminders=reminders,
             notes=notes,
+            dungeon_overview=dungeon_overview,
         )
 
         # Get LLM response with tool calling
@@ -467,6 +474,10 @@ class NetHackAgent:
         else:
             # Fallback to text parsing if no tool call
             decision = self.parser.parse(response.content)
+
+        # Attach LLM call metadata
+        decision.llm_usage = response.usage
+        decision.llm_finish_reason = response.finish_reason
 
         return decision
 

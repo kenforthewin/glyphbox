@@ -730,6 +730,18 @@ class NetHackAPI:
             return []
         return find_altars(self.observation)
 
+    def get_overview(self) -> str:
+        """
+        Get dungeon overview (#overview command output).
+
+        Executes the #overview extended command and captures the screen text.
+        This is a free action that doesn't consume a game turn.
+        Returns empty string if unavailable.
+        """
+        if not self._actions or not self.observation:
+            return ""
+        return self._actions.get_overview_screen()
+
     # ==================== Actions ====================
 
     def _record_message(self) -> None:
@@ -1314,22 +1326,28 @@ class NetHackAPI:
             excluded_positions=excluded_positions,
         )
 
-    def autoexplore(self, max_steps: int = 500) -> AutoexploreResult:
+    def autoexplore(self, max_steps: int = 500, ignore_monsters: bool = False) -> AutoexploreResult:
         """
         Explore automatically until interrupted (NetHack4-style).
 
         Runs exploration as a loop, moving toward unexplored areas and
         stopping only for critical conditions:
         - No unexplored areas reachable (fully_explored)
-        - Nearby hostile chasing monster (within 5 tiles) (hostile)
+        - Nearby hostile chasing monster (within 5 tiles) (hostile) [unless ignore_monsters]
         - HP drops below 30% (low_hp)
         - Hungry or weaker (hungry)
+        - Attacked / HP decreased (attacked) [only when ignore_monsters]
         - max_steps reached (max_steps)
         - Blind, confused, or stunned (blocked)
         - In Sokoban (sokoban)
 
         Does NOT stop for: items, stairs, altars, fountains, distant hostiles.
         The agent can check for these after exploration completes.
+
+        Args:
+            max_steps: Maximum exploration steps before stopping.
+            ignore_monsters: If True, ignore nearby hostiles and only stop
+                if actually attacked (HP decreases) or hunger state changes.
 
         Returns:
             AutoexploreResult with stop_reason, steps_taken, position
@@ -1374,6 +1392,7 @@ class NetHackAPI:
         steps_taken = 0
         turns_start = self.turn
         start_position = self.position
+        initial_hunger = self.get_stats().hunger
         failed_attempts = 0  # Safety counter for infinite loop prevention
         max_failed_attempts = 20  # Give up after this many consecutive failures
 
@@ -1407,6 +1426,7 @@ class NetHackAPI:
 
             # Check HP
             stats = self.get_stats()
+            hp_before = stats.hp  # Track for attacked detection
             if stats.hp / max(stats.max_hp, 1) < 0.3:
                 steps_msg = f" after {steps_taken} steps" if steps_taken > 0 else ""
                 return AutoexploreResult(
@@ -1417,8 +1437,8 @@ class NetHackAPI:
                     message=f"HP low: {stats.hp}/{stats.max_hp}{steps_msg}",
                 )
 
-            # Stop when hungry so agent can find food before it becomes critical
-            if stats.is_hungry:
+            # Stop when hunger state worsens during exploration
+            if stats.hunger != initial_hunger and stats.is_hungry:
                 steps_msg = f" after {steps_taken} steps" if steps_taken > 0 else ""
                 hunger_msg = "Weak - need food urgently" if stats.is_weak else "Hungry - need food"
                 return AutoexploreResult(
@@ -1432,21 +1452,22 @@ class NetHackAPI:
             # Check for NEARBY hostile monsters that will chase (not sessile monsters like molds)
             # Only stop if hostile is within 5 tiles - distant hostiles don't interrupt exploration
             current_pos = self.position
-            hostiles = self.get_hostile_monsters()
-            nearby_chasing = [
-                m for m in hostiles
-                if m.is_chasing and current_pos.chebyshev_distance(m.position) <= 5
-            ]
-            if nearby_chasing:
-                steps_msg = f" after {steps_taken} steps" if steps_taken > 0 else ""
-                return AutoexploreResult(
-                    stop_reason="hostile",
-                    steps_taken=steps_taken,
-                    turns_elapsed=self.turn - turns_start,
-                    position=self.position,
-                    message=f"Hostile nearby: {nearby_chasing[0].name}{steps_msg}",
-                )
-            # Note: sessile monsters (molds, fungi) and distant hostiles don't interrupt
+            if not ignore_monsters:
+                hostiles = self.get_hostile_monsters()
+                nearby_chasing = [
+                    m for m in hostiles
+                    if m.is_chasing and current_pos.chebyshev_distance(m.position) <= 5
+                ]
+                if nearby_chasing:
+                    steps_msg = f" after {steps_taken} steps" if steps_taken > 0 else ""
+                    return AutoexploreResult(
+                        stop_reason="hostile",
+                        steps_taken=steps_taken,
+                        turns_elapsed=self.turn - turns_start,
+                        position=self.position,
+                        message=f"Hostile nearby: {nearby_chasing[0].name}{steps_msg}",
+                    )
+                # Note: sessile monsters (molds, fungi) and distant hostiles don't interrupt
 
             # Target stickiness: only find new target if we don't have one or current is invalid
             need_new_target = False
@@ -1475,7 +1496,10 @@ class NetHackAPI:
             if need_new_target:
                 # Try to find unexplored areas, skipping recently abandoned targets
                 excluded = set(recently_abandoned)
-                target_result = self.find_unexplored(excluded_positions=excluded)
+                target_result = self.find_unexplored(
+                    allow_with_hostiles=ignore_monsters,
+                    excluded_positions=excluded,
+                )
 
                 # If no targets found but we have recently abandoned ones, DON'T clear and retry.
                 # This would cause an infinite loop if all targets are truly unreachable (e.g., blocked by boulder).
@@ -1650,6 +1674,18 @@ class NetHackAPI:
 
                 # Note: We no longer stop for engravings/graffiti - they're just flavor text
                 # and stopping causes loops when the agent walks back through the same tile.
+
+                # When ignoring monsters, detect if we were attacked (HP decreased)
+                if ignore_monsters:
+                    current_hp = self.get_stats().hp
+                    if current_hp < hp_before:
+                        return AutoexploreResult(
+                            stop_reason="attacked",
+                            steps_taken=steps_taken,
+                            turns_elapsed=self.turn - turns_start,
+                            position=self.position,
+                            message=f"Took damage: HP {hp_before} -> {current_hp}",
+                        )
             else:
                 # Movement failed - check if this was a diagonal move
                 # If so, try going around with cardinal moves (doorway restriction workaround)

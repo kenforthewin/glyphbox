@@ -36,6 +36,9 @@ class AgentDecision:
     command: Optional[str] = None  # For direct_action
     raw_response: str = ""
     parse_error: Optional[str] = None
+    # LLM call metadata (set by agent after LLM response)
+    llm_usage: Optional[dict] = None
+    llm_finish_reason: Optional[str] = None
 
     @property
     def is_valid(self) -> bool:

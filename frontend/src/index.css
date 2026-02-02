@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme {
+  /* Backgrounds */
+  --color-bg-primary: #0a0a0f;
+  --color-bg-secondary: #12121a;
+  --color-bg-tertiary: #1a1a26;
+
+  /* Borders */
+  --color-border-dim: #2a2a3a;
+  --color-border-bright: #3a3a50;
+
+  /* Text */
+  --color-text-primary: #d4d4e0;
+  --color-text-secondary: #8888a0;
+  --color-text-muted: #555570;
+
+  /* Accents */
+  --color-accent-green: #22c55e;
+  --color-accent-yellow: #eab308;
+  --color-accent-red: #ef4444;
+  --color-accent-cyan: #06b6d4;
+  --color-accent-purple: #a855f7;
+  --color-accent-amber: #f59e0b;
+
+  /* Fonts */
+  --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, Consolas,
+    monospace;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+
+  /* Game screen text size */
+  --text-game: 0.8125rem;
+  --text-game--line-height: 1.25rem;
+}
+
+html {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-dim);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-bright);
+}
+
+/* Game screen: exactly 80 monospace characters wide */
+.game-screen {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  font-variant-ligatures: none;
+  white-space: pre;
+  width: 80ch;
+  min-height: calc(24 * 1.25rem);
+  overflow: hidden;
+}
+
+/* Panel styling */
+.panel {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-dim);
+  border-radius: 0.25rem;
+}
+.panel-header {
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-dim);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+.panel-body {
+  padding: 0.75rem;
+}

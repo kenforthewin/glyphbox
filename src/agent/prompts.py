@@ -135,7 +135,7 @@ class PromptManager:
             steps = autoexplore.get("steps_taken", 0)
             message = autoexplore.get("message", "")
             # Include message for blocked/informative stop reasons
-            if message and stop_reason in ("blocked", "fully_explored", "hostile"):
+            if message and stop_reason in ("blocked", "fully_explored", "hostile", "attacked"):
                 result_lines.append(f"autoexplore: stopped ({stop_reason}) after {steps} steps - {message}")
             else:
                 result_lines.append(f"autoexplore: stopped ({stop_reason}) after {steps} steps")
@@ -232,6 +232,7 @@ class PromptManager:
         altars: Optional[list[Any]] = None,
         reminders: Optional[list[str]] = None,
         notes: Optional[list[tuple[int, str]]] = None,
+        dungeon_overview: Optional[str] = None,
     ) -> str:
         """
         Format a decision prompt with current game context.
@@ -356,6 +357,11 @@ class PromptManager:
                 note_lines.append(f"  {note_id}. {msg}")
             notes_text = "\n".join(note_lines)
 
+        # Format dungeon overview
+        overview_text = ""
+        if dungeon_overview:
+            overview_text = f"Dungeon Overview:\n{dungeon_overview}"
+
         kwargs = {
             "game_screen": game_screen or "Screen not available",
             "position": position_text,
@@ -369,6 +375,7 @@ class PromptManager:
             "skills_section": skills_section,
             "reminders": reminders_text,
             "notes": notes_text,
+            "dungeon_overview": overview_text,
         }
 
         return self.format_template("decision", **kwargs)
@@ -553,6 +560,9 @@ Do NOT import anything. All types are pre-loaded and imports will fail.
   # Stops for: "hostile" (nearby), "low_hp", "hungry", "fully_explored", "blocked"
   # Does NOT stop for items, stairs, features - explores until done or danger
   if result.stop_reason == "hostile": nh.attack(direction)
+  # ignore_monsters=True: ignore nearby enemies, only stop if attacked (HP drops)
+  result = nh.autoexplore(ignore_monsters=True)
+  if result.stop_reason == "attacked": ...  # took damage during exploration
 
 **nh.move_to(Position)** - Pathfind to a specific coordinate
   nh.move_to(Position(42, 12))  # Walk to that spot
@@ -689,6 +699,7 @@ DECISION_PROMPT = """=== CURRENT GAME VIEW ===
 {altars}
 {reminders}
 {notes}
+{dungeon_overview}
 {skills_section}
 Last Result:
 {last_result}

@@ -301,18 +301,17 @@ class Monster:
     threat_level: int = 0  # Estimated difficulty
 
     # Characters for sessile monsters (don't move, only attack if you engage them)
-    # F = fungi/molds (lichen, brown/yellow/green/red mold, shrieker, violet fungus)
-    # P = piercer, lurker above, trapper (ambush predators that don't chase)
-    # Sessile monster CLASSES - all monsters in these classes don't move
-    # 'F' = fungi/molds - sessile
-    # 'P' = puddings/blobs - sessile
-    SESSILE_CHARS = frozenset(['F', 'P'])
+    # 'F' = fungi/molds (lichen, brown/yellow/green/red mold, shrieker, violet fungus)
+    SESSILE_CHARS = frozenset(['F'])
 
     # Sessile monster NAMES - specific monsters that don't chase
     # (for classes where some monsters move and some don't)
     SESSILE_NAMES = frozenset([
         'floating eye',   # 'e' - doesn't move, paralyzes on melee
         'gas spore',      # 'e' - doesn't move, explodes on death
+        'acid blob',      # 'b' - doesn't move, passive acid attack
+        'spotted jelly',  # 'j' - sessile (speed 0), passive acid attack
+        'blue jelly',     # 'j' - sessile (speed 0), passive cold attack
     ])
 
     @property
@@ -519,7 +518,7 @@ class AutoexploreResult:
     @property
     def needs_attention(self) -> bool:
         """Whether the stop reason requires player attention."""
-        return self.stop_reason in ("hostile", "low_hp", "hungry", "trap", "item", "blocked")
+        return self.stop_reason in ("hostile", "low_hp", "hungry", "attacked", "trap", "item", "blocked")
 
 
 # Action key mappings for NLE
