@@ -62,3 +62,4 @@ skills/**/meta.json
 
 # Production config
 docker-compose.gcp.yml
+.env
