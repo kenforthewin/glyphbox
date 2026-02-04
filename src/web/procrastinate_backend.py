@@ -28,6 +28,11 @@ class ProcrastinateBackend:
         self._active_runs: set[str] = set()  # run_ids we believe are running
         self._monitor_task: asyncio.Task | None = None
         self._monitor_interval: float = 10.0
+        self._on_finished_callback = None
+
+    def set_on_finished_callback(self, callback):
+        """Set the callback invoked when a run is detected as finished."""
+        self._on_finished_callback = callback
 
     async def start_run(self, run_id: str, config: RunConfig) -> None:
         """Create a placeholder RunRecord and enqueue a Procrastinate job."""
@@ -133,6 +138,8 @@ class ProcrastinateBackend:
             run = await self._repo.get_run(run_id)
             if run and run.status in terminal_statuses:
                 self._active_runs.discard(run_id)
+                if self._on_finished_callback:
+                    self._on_finished_callback(run_id)
                 logger.info(f"Monitor: run {run_id} completed (status={run.status})")
 
     async def recover_state(self, active_runs: list[RunRecord]) -> None:

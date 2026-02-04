@@ -79,6 +79,9 @@ class TurnRecord:
     game_messages: list[str] = field(default_factory=list)
     api_calls: list[dict] = field(default_factory=list)
 
+    # Screen colors (base64-encoded tty_colors for web UI)
+    game_screen_colors: str | None = None
+
     # Extended game state (captured per-turn for web UI)
     inventory: list[dict] | None = None
     dungeon_overview: str | None = None
@@ -94,6 +97,7 @@ class TurnRecord:
             "game_turn": self.game_turn,
             "timestamp": self.timestamp.isoformat(),
             "game_screen": self.game_screen,
+            "game_screen_colors": self.game_screen_colors,
             "player_x": self.player_x,
             "player_y": self.player_y,
             "hp": self.hp,

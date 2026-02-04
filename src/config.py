@@ -191,7 +191,7 @@ class WorkerConfig:
     """
 
     enabled: bool = True  # True = Procrastinate workers, False = in-process
-    concurrency: int = 1  # max concurrent jobs per worker process
+    concurrency: int = 5  # max concurrent jobs per worker process
     queue: str = "agent_runs"
     monitor_interval: float = 10.0  # seconds between background status checks
 

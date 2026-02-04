@@ -197,14 +197,14 @@ class PostgresRepository:
             records.append(run)
         return records
 
-    async def get_leaderboard(
+    async def get_model_leaderboard(
         self,
-        metric: str = "score",
+        sort_by: str = "best_score",
         limit: int = 50,
-    ) -> list[RunRecord]:
-        """Get top runs ranked by score or depth.
+    ) -> list[dict]:
+        """Get aggregated stats per model, ranked by the chosen metric.
 
-        Only includes finished runs (not currently running).
+        Only includes finished runs (not currently running) with a non-empty model.
         Uses peak stats from turns as fallback when run-level stats are 0.
         """
         peak = (
@@ -224,35 +224,51 @@ class PostgresRepository:
             runs.c.final_depth, func.coalesce(peak.c.peak_depth, 0)
         )
 
-        query = (
+        # Per-run effective stats
+        per_run = (
             select(
-                runs,
-                users.c.display_name.label("username"),
-                effective_score.label("effective_score"),
-                effective_depth.label("effective_depth"),
+                runs.c.model,
+                effective_score.label("eff_score"),
+                effective_depth.label("eff_depth"),
             )
-            .outerjoin(users, runs.c.user_id == users.c.id)
             .outerjoin(peak, runs.c.run_id == peak.c.run_id)
             .where(runs.c.status != "running")
+            .where(runs.c.model != "")
+            .subquery()
+        )
+
+        best_score = func.max(per_run.c.eff_score).label("best_score")
+        avg_score = func.round(func.avg(per_run.c.eff_score)).label("avg_score")
+        best_depth = func.max(per_run.c.eff_depth).label("best_depth")
+        run_count = func.count().label("run_count")
+
+        query = (
+            select(per_run.c.model, best_score, avg_score, best_depth, run_count)
+            .group_by(per_run.c.model)
             .limit(limit)
         )
 
-        if metric == "depth":
-            query = query.order_by(desc(effective_depth), desc(effective_score))
+        if sort_by == "avg_score":
+            query = query.order_by(desc(avg_score), desc(best_score))
+        elif sort_by == "best_depth":
+            query = query.order_by(desc(best_depth), desc(best_score))
         else:
-            query = query.order_by(desc(effective_score), desc(effective_depth))
+            query = query.order_by(desc(best_score), desc(best_depth))
 
         async with self._engine.connect() as conn:
             result = await conn.execute(query)
             rows = result.mappings().all()
 
-        records = []
-        for row in rows:
-            run = self._row_to_run(row)
-            run.final_score = row["effective_score"] or run.final_score
-            run.final_depth = row["effective_depth"] or run.final_depth
-            records.append(run)
-        return records
+        return [
+            {
+                "model": row["model"],
+                "best_score": row["best_score"] or 0,
+                "avg_score": row["avg_score"] or 0,
+                "best_depth": row["best_depth"] or 0,
+                "run_count": row["run_count"],
+            }
+            for row in rows
+        ]
 
     async def list_runs_by_status(self, statuses: list[str]) -> list[RunRecord]:
         """List runs matching any of the given statuses."""
@@ -295,6 +311,7 @@ class PostgresRepository:
                     game_turn=turn.game_turn,
                     timestamp=turn.timestamp,
                     game_screen=turn.game_screen,
+                    game_screen_colors=turn.game_screen_colors,
                     player_x=turn.player_x,
                     player_y=turn.player_y,
                     hp=turn.hp,
@@ -442,6 +459,7 @@ class PostgresRepository:
             game_turn=row["game_turn"],
             timestamp=row["timestamp"],
             game_screen=row["game_screen"],
+            game_screen_colors=row.get("game_screen_colors"),
             player_x=row["player_x"],
             player_y=row["player_y"],
             hp=row["hp"],

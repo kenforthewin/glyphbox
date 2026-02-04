@@ -58,6 +58,13 @@ export function Header({ children }: HeaderProps) {
       </h1>
 
       <Link
+        to="/runs"
+        className="text-xs text-text-secondary hover:text-text-primary"
+      >
+        Runs
+      </Link>
+
+      <Link
         to="/leaderboard"
         className="text-xs text-text-secondary hover:text-text-primary"
       >
@@ -65,6 +72,14 @@ export function Header({ children }: HeaderProps) {
       </Link>
 
       <div className="ml-auto flex items-center gap-3">
+        {authEnabled && user && (
+          <Link
+            to="/new"
+            className="rounded bg-accent-green px-2 py-1 text-xs font-medium text-bg-primary hover:bg-accent-green/80"
+          >
+            New Run
+          </Link>
+        )}
         {children}
 
         {authEnabled && !isLoading && (

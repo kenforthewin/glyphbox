@@ -41,6 +41,7 @@ export interface TurnRecord {
   game_turn: number;
   timestamp: string;
   game_screen: string;
+  game_screen_colors: string | null;
   player_x: number;
   player_y: number;
   hp: number;
@@ -104,6 +105,14 @@ export interface ListRunsParams {
   sort_by?: "recent" | "score" | "depth";
   model?: string;
   user_id?: number;
+}
+
+export interface ModelLeaderboardEntry {
+  model: string;
+  best_score: number;
+  avg_score: number;
+  best_depth: number;
+  run_count: number;
 }
 
 export type WsMessage =

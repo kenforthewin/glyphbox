@@ -90,6 +90,7 @@ class NetHackAPI:
         max_episode_steps: int = 1_000_000,
         render_mode: Optional[str] = None,
         dungeon_memory: Optional[DungeonMemory] = None,
+        character: str = "val-hum-fem-law",
     ):
         """
         Initialize the NetHack API.
@@ -99,11 +100,13 @@ class NetHackAPI:
             max_episode_steps: Maximum steps per episode
             render_mode: Render mode ("human", "ansi", or None)
             dungeon_memory: Optional dungeon memory for exploration tracking
+            character: NetHack character spec (e.g. "random", "val-hum-fem-law")
         """
         self._env = NLEWrapper(
             env_name=env_name,
             max_episode_steps=max_episode_steps,
             render_mode=render_mode,
+            character=character,
         )
         self._actions: Optional[ActionExecutor] = None
         self._last_prayer_turn = 0
@@ -441,6 +444,12 @@ class NetHackAPI:
         if not self.observation:
             return []
         return self.observation.get_screen_lines()
+
+    def get_screen_colors(self) -> str:
+        """Get screen color data as base64-encoded string."""
+        if not self.observation:
+            return ""
+        return self.observation.get_screen_colors_base64()
 
     def get_local_map(self, radius: int = 7) -> str:
         """

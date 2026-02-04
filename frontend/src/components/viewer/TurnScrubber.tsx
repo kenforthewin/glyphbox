@@ -12,6 +12,8 @@ interface TurnScrubberProps {
   onGoToTurn: (index: number) => void;
   onJumpToLive: () => void;
   showLiveButton: boolean;
+  autoPlay?: boolean;
+  onToggleAutoPlay?: () => void;
 }
 
 const btnClass =
@@ -29,6 +31,8 @@ export function TurnScrubber({
   onGoToTurn,
   onJumpToLive,
   showLiveButton,
+  autoPlay = false,
+  onToggleAutoPlay,
 }: TurnScrubberProps) {
   return (
     <div className="flex items-center gap-3 rounded border border-border-dim bg-bg-secondary px-3 py-2">
@@ -57,6 +61,16 @@ export function TurnScrubber({
         <button className={btnClass} onClick={onGoLast}>
           &rarr;|
         </button>
+        {onToggleAutoPlay && !showLiveButton && (
+          <button
+            className={`${btnClass} ${autoPlay ? "text-accent-cyan" : ""}`}
+            onClick={onToggleAutoPlay}
+            disabled={isLive}
+            title={autoPlay ? "Pause auto-play" : "Auto-play"}
+          >
+            {autoPlay ? "\u23F8" : "\u25B6"}
+          </button>
+        )}
       </div>
 
       <input

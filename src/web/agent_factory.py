@@ -43,6 +43,7 @@ def create_agent_for_run(
     api = NetHackAPI(
         env_name=config.environment.name,
         max_episode_steps=config.environment.max_episode_steps,
+        character=character,
     )
     api.reset()
 

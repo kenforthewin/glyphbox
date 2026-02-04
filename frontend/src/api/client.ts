@@ -1,6 +1,7 @@
 import type {
   ListRunsParams,
   ModelInfo,
+  ModelLeaderboardEntry,
   RunRecord,
   StartRunRequest,
   StartRunResponse,
@@ -71,8 +72,8 @@ export const api = {
   getRunModels: () => fetchJson<string[]>(ENDPOINTS.runModels),
 
   // Leaderboard
-  getLeaderboard: (metric: "score" | "depth" = "score", limit = 50) =>
-    fetchJson<RunRecord[]>(ENDPOINTS.leaderboard, { metric, limit }),
+  getLeaderboard: (sortBy: "best_score" | "avg_score" | "best_depth" = "best_score", limit = 50) =>
+    fetchJson<ModelLeaderboardEntry[]>(ENDPOINTS.leaderboard, { sort_by: sortBy, limit }),
 
   // Auth
   getMe: () => fetchJson<UserRecord>("/api/auth/me"),

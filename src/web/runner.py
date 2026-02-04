@@ -180,6 +180,7 @@ class WebAgentRunner:
                 pass
             return {
                 "screen": self.api.get_screen(),
+                "screen_colors": self.api.get_screen_colors(),
                 "message": self.api.get_message(),
                 "player_x": stats.position.x,
                 "player_y": stats.position.y,
@@ -211,6 +212,7 @@ class WebAgentRunner:
             game_turn=pre_state.get("game_turn", 0),
             timestamp=datetime.now(),
             game_screen=pre_state.get("screen", ""),
+            game_screen_colors=pre_state.get("screen_colors") or None,
             player_x=pre_state.get("player_x", 0),
             player_y=pre_state.get("player_y", 0),
             hp=pre_state.get("hp", 0),
@@ -239,35 +241,51 @@ class WebAgentRunner:
         )
 
     async def _save_final_turn(self) -> None:
-        """Capture the post-death/end game state as a final turn.
+        """Save a synthetic game-over turn with summary stats.
 
         The normal loop records pre-state before each step, so when the game
-        ends mid-step the death screen is never saved.  This adds one last
-        turn record showing whatever the screen looks like after the game ended.
+        ends mid-step the death screen is never saved.  Instead of showing
+        the NLE post-death screen (top-ten list), we build a simple summary.
         """
         if not self._run_record:
             return
         try:
-            final_state = self._capture_game_state()
-            if not final_state:
-                return
+            # Pull peak stats from previously saved turns (NLE zeroes stats
+            # after death, so the live observation is unreliable).
+            peak = await self.repo.get_run_peak_stats(self._run_record.run_id)
+            score = peak["score"] if peak else 0
+            depth = peak["depth"] if peak else 1
+            xp_level = peak["xp_level"] if peak else 1
+            game_turn = peak["game_turn"] if peak else 0
+
+            # Build a simple game-over screen (80-col centered)
+            lines = [""] * 8
+            lines.append("GAME OVER".center(80))
+            lines.append("")
+            lines.append(f"Score: {score}".center(80))
+            lines.append(f"Depth: {depth}   XL: {xp_level}   Turns: {game_turn}".center(80))
+            lines.append("")
+            lines.extend([""] * (24 - len(lines)))
+            game_over_screen = "\n".join(lines)
+
             self._turn_counter += 1
             final_turn = TurnRecord(
                 run_id=self._run_record.run_id,
                 turn_number=self._turn_counter,
-                game_turn=final_state.get("game_turn", 0),
+                game_turn=game_turn,
                 timestamp=datetime.now(),
-                game_screen=final_state.get("screen", ""),
-                player_x=final_state.get("player_x", 0),
-                player_y=final_state.get("player_y", 0),
-                hp=final_state.get("hp", 0),
-                max_hp=final_state.get("max_hp", 0),
-                dungeon_level=final_state.get("dungeon_level", 1),
-                depth=final_state.get("depth", 0),
-                xp_level=final_state.get("xp_level", 1),
-                score=final_state.get("score", 0),
-                hunger=final_state.get("hunger", ""),
-                game_message=final_state.get("message", ""),
+                game_screen=game_over_screen,
+                game_screen_colors=None,
+                player_x=0,
+                player_y=0,
+                hp=0,
+                max_hp=0,
+                dungeon_level=depth,
+                depth=depth,
+                xp_level=xp_level,
+                score=score,
+                hunger="",
+                game_message="",
                 llm_reasoning="",
                 llm_model=self.agent.llm.model,
                 action_type="game_over",
@@ -275,8 +293,8 @@ class WebAgentRunner:
                 execution_success=True,
                 game_messages=[],
                 api_calls=[],
-                inventory=final_state.get("inventory"),
-                dungeon_overview=final_state.get("dungeon_overview"),
+                inventory=None,
+                dungeon_overview=None,
             )
             await self.repo.save_turn(final_turn)
         except Exception as e:

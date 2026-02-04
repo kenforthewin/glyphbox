@@ -68,9 +68,8 @@ async def lifespan(app: FastAPI):
             max_total_runs=10,
         )
 
-        # Wire up the on_finished callback for InProcessBackend
-        if isinstance(backend, InProcessBackend):
-            backend.set_on_finished_callback(run_manager.get_on_finished_callback())
+        # Wire up the on_finished callback so RunManager cleans up _user_runs
+        backend.set_on_finished_callback(run_manager.get_on_finished_callback())
 
         app.state.run_manager = run_manager
 

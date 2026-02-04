@@ -1,0 +1,26 @@
+.git
+.gitignore
+.venv
+.uv
+__pycache__
+*.pyc
+*.pyo
+data/
+*.log
+*.db
+.pytest_cache
+.coverage
+htmlcov
+.DS_Store
+.idea
+.vscode
+.dev-secrets
+
+# Frontend (built separately in Dockerfile.frontend)
+frontend/node_modules
+frontend/dist
+
+# Docker files
+Dockerfile
+Dockerfile.frontend
+docker-compose*.yml

@@ -355,36 +355,44 @@ class TestLeaderboard:
         return PostgresRepository(engine)
 
     async def test_leaderboard_by_score(self, repo):
-        user = await repo.upsert_user("or-lead", display_name="leader")
-        for i, (score, depth) in enumerate([(100, 3), (500, 5), (200, 8)]):
+        await repo.upsert_user("or-lead", display_name="leader")
+        for i, (model, score, depth) in enumerate(
+            [("model-a", 100, 3), ("model-b", 500, 5), ("model-a", 200, 8)]
+        ):
             await repo.create_run(
                 RunRecord(
                     run_id=f"lb-{i}",
                     started_at=datetime(2026, 1, i + 1),
-                    model="test",
-                    user_id=user.id,
+                    model=model,
                     final_score=score,
                     final_depth=depth,
                     status="stopped",
                 )
             )
-        runs = await repo.get_leaderboard(metric="score")
-        assert runs[0].final_score == 500
-        assert runs[0].username == "leader"
+        entries = await repo.get_model_leaderboard(sort_by="best_score")
+        assert entries[0]["model"] == "model-b"
+        assert entries[0]["best_score"] == 500
+        # model-a has best_score=200, avg_score=150
+        model_a = next(e for e in entries if e["model"] == "model-a")
+        assert model_a["best_score"] == 200
+        assert model_a["run_count"] == 2
 
     async def test_leaderboard_by_depth(self, repo):
-        for i, depth in enumerate([3, 8, 5]):
+        for i, (model, depth) in enumerate(
+            [("model-a", 3), ("model-b", 8), ("model-a", 5)]
+        ):
             await repo.create_run(
                 RunRecord(
                     run_id=f"lb-d-{i}",
                     started_at=datetime(2026, 1, i + 1),
-                    model="test",
+                    model=model,
                     final_depth=depth,
                     status="stopped",
                 )
             )
-        runs = await repo.get_leaderboard(metric="depth")
-        assert runs[0].final_depth == 8
+        entries = await repo.get_model_leaderboard(sort_by="best_depth")
+        assert entries[0]["model"] == "model-b"
+        assert entries[0]["best_depth"] == 8
 
     async def test_leaderboard_excludes_running(self, repo):
         await repo.create_run(
@@ -405,9 +413,10 @@ class TestLeaderboard:
                 status="stopped",
             )
         )
-        runs = await repo.get_leaderboard()
-        assert len(runs) == 1
-        assert runs[0].run_id == "stopped-1"
+        entries = await repo.get_model_leaderboard()
+        assert len(entries) == 1
+        assert entries[0]["model"] == "test"
+        assert entries[0]["best_score"] == 100
 
 
 @db_skip

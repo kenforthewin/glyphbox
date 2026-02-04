@@ -266,6 +266,7 @@ async def create_watched_agent(
     api = NetHackAPI(
         env_name=config.environment.name,
         max_episode_steps=config.environment.max_episode_steps,
+        character=config.environment.character,
     )
     api.reset()  # Must reset to start a fresh game
 

@@ -44,7 +44,7 @@ export function AboutModal({ onClose }: AboutModalProps) {
           </p>
           <div className="border-t border-border-dim pt-3 text-xs text-text-muted">
             <a
-              href="https://github.com/kennethbergquist/glyphbox"
+              href="https://github.com/kenforthewin/glyphbox"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-text-secondary"

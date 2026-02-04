@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PageShell } from "../components/layout/PageShell";
 import { Header } from "../components/layout/Header";
 import { StatusBadge } from "../components/runs/StatusBadge";
@@ -44,6 +44,41 @@ export function RunViewerPage() {
   const turns = liveTurns.length > 0 ? liveTurns : replayTurns;
 
   const nav = useTurnNavigation(turns);
+
+  // Auto-play: advance one turn every 3s (replay mode only).
+  // For non-live runs, start from turn 0 with auto-play on by default.
+  const [autoPlay, setAutoPlay] = useState(false);
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (initializedRef.current) return;
+    if (!run || nav.totalTurns === 0) return;
+    const live = run.status === "running" || run.status === "starting";
+    if (!live) {
+      nav.goFirst();
+      setAutoPlay(true);
+    }
+    initializedRef.current = true;
+  }, [run, nav.totalTurns, nav.goFirst]);
+
+  const toggleAutoPlay = useCallback(() => setAutoPlay((v) => !v), []);
+
+  useEffect(() => {
+    if (!autoPlay) return;
+    if (nav.currentIndex >= nav.totalTurns - 1) {
+      setAutoPlay(false);
+      return;
+    }
+    const id = setInterval(() => {
+      nav.goNext();
+    }, 3000);
+    return () => clearInterval(id);
+  }, [autoPlay, nav.currentIndex, nav.totalTurns, nav.goNext]);
+
+  // Stop auto-play when entering live mode
+  useEffect(() => {
+    if (nav.isLive) setAutoPlay(false);
+  }, [nav.isLive]);
 
   const keyMap = useMemo(
     () => ({
@@ -119,6 +154,8 @@ export function RunViewerPage() {
               onGoToTurn={nav.goToTurn}
               onJumpToLive={nav.jumpToLive}
               showLiveButton={isRunning}
+              autoPlay={autoPlay}
+              onToggleAutoPlay={toggleAutoPlay}
             />
           </div>
         </>

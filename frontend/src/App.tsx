@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./hooks/useAuth";
+import { FeaturedPage } from "./pages/FeaturedPage";
 import { RunListPage } from "./pages/RunListPage";
 import { RunViewerPage } from "./pages/RunViewerPage";
 import { NewRunPage } from "./pages/NewRunPage";
@@ -11,7 +12,8 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<RunListPage />} />
+          <Route path="/" element={<FeaturedPage />} />
+          <Route path="/runs" element={<RunListPage />} />
           <Route path="/new" element={<NewRunPage />} />
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/users/:userId" element={<UserProfilePage />} />

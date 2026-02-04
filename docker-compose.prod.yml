@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${NETHACK_AGENT_DB_NAME:-nethack_agent}
+      POSTGRES_USER: ${NETHACK_AGENT_DB_USER:-nethack}
+      POSTGRES_PASSWORD: ${NETHACK_AGENT_DB_PASSWORD:-nethack}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NETHACK_AGENT_DB_USER:-nethack} -d ${NETHACK_AGENT_DB_NAME:-nethack_agent}"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["serve"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NETHACK_AGENT_DB_HOST: postgres
+      NETHACK_AGENT_DB_PORT: "5432"
+      NETHACK_AGENT_DB_NAME: ${NETHACK_AGENT_DB_NAME:-nethack_agent}
+      NETHACK_AGENT_DB_USER: ${NETHACK_AGENT_DB_USER:-nethack}
+      NETHACK_AGENT_DB_PASSWORD: ${NETHACK_AGENT_DB_PASSWORD:-nethack}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-}
+      AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY:-}
+      AUTH_CALLBACK_URL: ${AUTH_CALLBACK_URL:-}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    environment:
+      NETHACK_AGENT_DB_HOST: postgres
+      NETHACK_AGENT_DB_PORT: "5432"
+      NETHACK_AGENT_DB_NAME: ${NETHACK_AGENT_DB_NAME:-nethack_agent}
+      NETHACK_AGENT_DB_USER: ${NETHACK_AGENT_DB_USER:-nethack}
+      NETHACK_AGENT_DB_PASSWORD: ${NETHACK_AGENT_DB_PASSWORD:-nethack}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:

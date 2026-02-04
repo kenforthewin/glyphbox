@@ -68,6 +68,7 @@ turns = sa.Table(
     sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
     # Game state (pre-decision snapshot)
     sa.Column("game_screen", sa.Text, nullable=False),
+    sa.Column("game_screen_colors", sa.Text, nullable=True),
     sa.Column("player_x", sa.Integer, nullable=False),
     sa.Column("player_y", sa.Integer, nullable=False),
     sa.Column("hp", sa.Integer, nullable=False),

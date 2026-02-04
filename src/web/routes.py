@@ -177,13 +177,12 @@ async def get_run(
 
 @router.get("/leaderboard")
 async def get_leaderboard(
-    metric: str = Query(default="score", pattern="^(score|depth)$"),
+    sort_by: str = Query(default="best_score", pattern="^(best_score|avg_score|best_depth)$"),
     limit: int = Query(default=50, le=200),
     repo: PostgresRepository = Depends(get_repo),
 ):
-    """Get top runs ranked by score or depth."""
-    runs = await repo.get_leaderboard(metric=metric, limit=limit)
-    return [r.to_dict() for r in runs]
+    """Get model leaderboard with aggregated stats."""
+    return await repo.get_model_leaderboard(sort_by=sort_by, limit=limit)
 
 
 # === Turn endpoints ===

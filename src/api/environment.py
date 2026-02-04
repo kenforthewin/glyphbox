@@ -175,6 +175,12 @@ class Observation:
             lines.append(line)
         return lines
 
+    def get_screen_colors_base64(self) -> str:
+        """Get tty_colors as a base64-encoded string (24x80 = 1920 bytes -> 2560 chars)."""
+        import base64
+
+        return base64.b64encode(self.tty_colors.astype(np.uint8).tobytes()).decode("ascii")
+
 
 class NLEWrapper:
     """
@@ -188,6 +194,7 @@ class NLEWrapper:
         env_name: str = "NetHackChallenge-v0",
         max_episode_steps: int = 1_000_000,
         render_mode: Optional[str] = None,
+        character: str = "val-hum-fem-law",
     ):
         """
         Initialize the NLE wrapper.
@@ -196,6 +203,7 @@ class NLEWrapper:
             env_name: Name of the gymnasium environment
             max_episode_steps: Maximum steps per episode
             render_mode: Render mode ("human", "ansi", or None)
+            character: NetHack character spec (e.g. "random", "val-hum-fem-law")
         """
         self.env_name = env_name
         self.max_episode_steps = max_episode_steps
@@ -206,7 +214,7 @@ class NLEWrapper:
         self._done: bool = True
         self._episode_step: int = 0
         self._total_reward: float = 0.0
-        self._character: str = "val-hum-fem-law"  # Default character
+        self._character: str = character
 
         logger.info(f"NLEWrapper initialized with env={env_name}")
 
@@ -240,8 +248,7 @@ class NLEWrapper:
                 allow_all_modes=True,
                 render_mode=self.render_mode,
                 options=options,
-                # Lawful Human Female Valkyrie - good "easy mode" starting option
-                character="val-hum-fem-law",
+                character=self._character,
             )
             return env
         except Exception as e:

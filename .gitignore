@@ -58,3 +58,7 @@ Thumbs.db
 # Project specific
 skills/**/meta.json
 !skills/SKILL.md
+
+
+# Production config
+docker-compose.gcp.yml
