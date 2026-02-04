@@ -22,8 +22,7 @@ services:
       dockerfile: Dockerfile
     command: ["serve"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     environment:
       NETHACK_AGENT_DB_HOST: postgres
       NETHACK_AGENT_DB_PORT: "5432"
@@ -42,10 +41,8 @@ services:
       dockerfile: Dockerfile
     command: ["worker"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      api:
-        condition: service_started
+      - postgres
+      - api
     environment:
       NETHACK_AGENT_DB_HOST: postgres
       NETHACK_AGENT_DB_PORT: "5432"
