@@ -55,8 +55,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     depends_on:
       - api
     restart: unless-stopped
