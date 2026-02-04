@@ -49,6 +49,7 @@ services:
       NETHACK_AGENT_DB_NAME: nethack_agent
       NETHACK_AGENT_DB_USER: nethack
       NETHACK_AGENT_DB_PASSWORD: nethack
+      AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY}
     restart: unless-stopped
 
   frontend:
