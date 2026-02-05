@@ -113,6 +113,12 @@ class WebAgentRunner:
                     await asyncio.sleep(0.1)
                     continue
 
+                # Check if run was stopped via DB (e.g. user clicked Stop in UI)
+                if await self._is_stopped_in_db():
+                    logger.info(f"Run {self.run_id} stopped via DB, exiting loop")
+                    self._running = False
+                    break
+
                 # Capture game state before the agent decides
                 pre_state = self._capture_game_state()
 
@@ -156,6 +162,17 @@ class WebAgentRunner:
                     self._on_finished(self._run_record.run_id)
                 except Exception:
                     pass
+
+    async def _is_stopped_in_db(self) -> bool:
+        """Check if the run has been marked as stopped in the database."""
+        if not self._run_record:
+            return False
+        try:
+            run = await self.repo.get_run(self._run_record.run_id)
+            return run is not None and run.status == "stopped"
+        except Exception as e:
+            logger.warning(f"Failed to check run status: {e}")
+            return False
 
     def _capture_game_state(self) -> dict[str, Any]:
         """Snapshot game state before the agent decides."""

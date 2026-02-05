@@ -43,6 +43,7 @@ html {
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: var(--color-bg-primary);
@@ -64,7 +65,6 @@ html {
   white-space: pre;
   width: 80ch;
   min-height: calc(24 * 1.25rem);
-  overflow: hidden;
 }
 
 /* Panel styling */
@@ -72,6 +72,7 @@ html {
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border-dim);
   border-radius: 0.25rem;
+  overflow: hidden;
 }
 .panel-header {
   padding: 0.375rem 0.75rem;
@@ -84,4 +85,5 @@ html {
 }
 .panel-body {
   padding: 0.75rem;
+  overflow-x: auto;
 }

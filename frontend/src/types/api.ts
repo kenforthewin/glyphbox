@@ -21,7 +21,7 @@ export interface RunRecord {
   final_xp_level: number;
   total_agent_turns: number;
   total_llm_tokens: number;
-  status: "running" | "stopped" | "error";
+  status: "starting" | "running" | "stopped" | "error";
   user_id: number | null;
   visibility: string;
   username: string;

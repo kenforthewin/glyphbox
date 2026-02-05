@@ -50,6 +50,7 @@ services:
       NETHACK_AGENT_DB_USER: nethack
       NETHACK_AGENT_DB_PASSWORD: nethack
       AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY}
+      NETHACK_WORKER_CONCURRENCY: "5"
     restart: unless-stopped
 
   frontend:

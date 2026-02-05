@@ -29,11 +29,11 @@ EXECUTE_CODE_TOOL = {
             "properties": {
                 "reasoning": {
                     "type": "string",
-                    "description": "Brief explanation of what the code will do"
+                    "description": "1-2 sentence explanation of what the code will do. Be concise - do NOT repeat map analysis or game state here."
                 },
                 "code": {
                     "type": "string",
-                    "description": "Python code to execute. Has access to 'nh' (game API) and Direction enum. All calls are synchronous - do NOT use await."
+                    "description": "Python code to execute. Has access to 'nh' (game API) and Direction enum. All calls are synchronous - do NOT use await. Do NOT include lengthy comments repeating your reasoning - the code should be clean and minimal."
                 }
             },
             "required": ["reasoning", "code"]

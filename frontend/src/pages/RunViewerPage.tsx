@@ -1,6 +1,5 @@
 import { useParams } from "react-router-dom";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { PageShell } from "../components/layout/PageShell";
 import { Header } from "../components/layout/Header";
 import { StatusBadge } from "../components/runs/StatusBadge";
 import { LiveBadge } from "../components/viewer/LiveBadge";
@@ -93,21 +92,25 @@ export function RunViewerPage() {
 
   if (runLoading) {
     return (
-      <PageShell>
-        <Header />
-        <div className="py-12 text-center text-text-muted">Loading run...</div>
-      </PageShell>
+      <div className="min-h-screen bg-bg-primary px-4 py-4 font-sans">
+        <div className="mx-auto max-w-[1600px]">
+          <Header />
+          <div className="py-12 text-center text-text-muted">Loading run...</div>
+        </div>
+      </div>
     );
   }
 
   if (runError || !run) {
     return (
-      <PageShell>
-        <Header />
-        <div className="py-12 text-center text-accent-red">
-          {runError?.message ?? "Run not found"}
+      <div className="min-h-screen bg-bg-primary px-4 py-4 font-sans">
+        <div className="mx-auto max-w-[1600px]">
+          <Header />
+          <div className="py-12 text-center text-accent-red">
+            {runError?.message ?? "Run not found"}
+          </div>
         </div>
-      </PageShell>
+      </div>
     );
   }
 
@@ -115,33 +118,41 @@ export function RunViewerPage() {
   const error = liveTurns.length > 0 ? null : isRunning ? null : turnsError;
 
   return (
-    <PageShell>
-      <Header>
-        <span className="font-mono text-xs text-text-secondary">
-          {run.run_id}
-        </span>
-        <StatusBadge status={run.status} />
-        {isRunning && <LiveBadge connected={connected} />}
-      </Header>
+    <div className="flex h-screen flex-col bg-bg-primary font-sans">
+      <div className="mx-auto w-full max-w-[1600px] flex-1 overflow-hidden px-4 pt-4">
+        <div className="flex h-full flex-col">
+          <Header>
+            <span className="font-mono text-xs text-text-secondary">
+              {run.run_id}
+            </span>
+            <StatusBadge status={run.status} />
+            {isRunning && <LiveBadge connected={connected} />}
+          </Header>
 
-      {error && (
-        <div className="mb-2 text-sm text-accent-red">{error.message}</div>
-      )}
+          {error && (
+            <div className="mb-2 text-sm text-accent-red">{error.message}</div>
+          )}
 
-      {loading ? (
-        <div className="py-12 text-center text-text-muted">
-          Loading turns...
+          {loading ? (
+            <div className="py-12 text-center text-text-muted">
+              Loading turns...
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+              <StatsBar turn={nav.currentTurn} />
+
+              <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(680px,auto)_1fr]">
+                <GameScreen turn={nav.currentTurn} />
+                <ActionPanel turn={nav.currentTurn} />
+              </div>
+            </div>
+          )}
         </div>
-      ) : (
-        <>
-          <StatsBar turn={nav.currentTurn} />
+      </div>
 
-          <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(680px,auto)_1fr]">
-            <GameScreen turn={nav.currentTurn} />
-            <ActionPanel turn={nav.currentTurn} />
-          </div>
-
-          <div className="mt-2">
+      {!loading && (
+        <div className="sticky bottom-0 border-t border-border-dim bg-bg-primary px-4 py-2">
+          <div className="mx-auto max-w-[1600px]">
             <TurnScrubber
               currentIndex={nav.currentIndex}
               totalTurns={nav.totalTurns}
@@ -158,8 +169,8 @@ export function RunViewerPage() {
               onToggleAutoPlay={toggleAutoPlay}
             />
           </div>
-        </>
+        </div>
       )}
-    </PageShell>
+    </div>
   );
 }
